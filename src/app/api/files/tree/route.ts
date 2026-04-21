@@ -51,7 +51,8 @@ async function getFolderTree(userId: string): Promise<FolderWithRelations[]> {
     });
 
     const childrenWithNested = await Promise.all(
-      children.map((child) => loadChildren(child as unknown as FolderWithRelations))
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      children.map((child: any) => loadChildren(child as FolderWithRelations))
     );
 
     return {
@@ -61,7 +62,8 @@ async function getFolderTree(userId: string): Promise<FolderWithRelations[]> {
   };
 
   return Promise.all(
-    rootFolders.map((folder) => loadChildren(folder as unknown as FolderWithRelations))
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    rootFolders.map((folder: any) => loadChildren(folder as FolderWithRelations))
   );
 }
 
