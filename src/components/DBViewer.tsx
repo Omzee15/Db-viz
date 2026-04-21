@@ -24,7 +24,6 @@ import {
   Eye,
   EyeOff,
   Search,
-  Sparkles,
 } from "lucide-react";
 
 interface Column {
@@ -508,14 +507,6 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange }: DB
           >
             <ZoomIn className="h-4 w-4" />
             Fit
-          </button>
-
-          <button
-            className="flex items-center gap-2 text-sm text-white rounded-md hover:opacity-90"
-            style={{ background: '#9B8F5E', padding: '8px 16px' }}
-          >
-            <Sparkles className="h-4 w-4" />
-            AI Assist
           </button>
         </div>
       </div>
