@@ -1,26 +1,95 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* Solarized Light theme from Project-Nest */
+  --background: #F5EFE7;
+  --foreground: #3E2723;
+  --card: #E8DFD0;
+  --card-foreground: #3E2723;
+  --primary: #9B8F5E;
+  --primary-foreground: #FFFFFF;
+  --secondary: #EBE3D5;
+  --secondary-foreground: #3E2723;
+  --muted: #D9CDBF;
+  --muted-foreground: #8B7355;
+  --accent: #9B8F5E;
+  --accent-foreground: #FFFFFF;
+  --destructive: #C4756C;
+  --destructive-foreground: #FFFFFF;
+  --border: #D9CDBF;
+  --input: #E8DFD0;
+  --ring: #9B8F5E;
+  --radius: 0.5rem;
+  
+  /* Table node colors */
+  --table-header: #9B8F5E;
+  --table-bg: #E8DFD0;
+  --table-text: #3E2723;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #1E1E1E;
+    --foreground: #F5EFE7;
+    --card: #2D2D2D;
+    --card-foreground: #F5EFE7;
+    --primary: #9B8F5E;
+    --primary-foreground: #FFFFFF;
+    --secondary: #3D3D3D;
+    --secondary-foreground: #F5EFE7;
+    --muted: #3D3D3D;
+    --muted-foreground: #A0A0A0;
+    --accent: #9B8F5E;
+    --accent-foreground: #FFFFFF;
+    --destructive: #C4756C;
+    --destructive-foreground: #FFFFFF;
+    --border: #4D4D4D;
+    --input: #3D3D3D;
+    --ring: #9B8F5E;
+    
+    --table-header: #9B8F5E;
+    --table-bg: #2D2D2D;
+    --table-text: #F5EFE7;
   }
+}
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* ReactFlow styles */
+.react-flow__node {
+  font-size: 12px;
+}
+
+.react-flow__edge-path {
+  stroke-width: 2;
+}
+
+/* Scrollbar styles */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--muted);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--muted-foreground);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--foreground);
 }
