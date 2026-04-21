@@ -23,7 +23,7 @@ export async function signToken(payload: Omit<JWTPayload, "exp" | "iat">) {
 export async function verifyToken(token: string): Promise<JWTPayload | null> {
   try {
     const { payload } = await jwtVerify(token, JWT_SECRET);
-    return payload as JWTPayload;
+    return payload as unknown as JWTPayload;
   } catch {
     return null;
   }
