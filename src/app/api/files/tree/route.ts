@@ -61,7 +61,7 @@ async function getFolderTree(userId: string): Promise<FolderWithRelations[]> {
   };
 
   return Promise.all(
-    rootFolders.map((folder) => loadChildren(folder as unknown as FolderWithRelations))
+    rootFolders.map((folder: FolderWithRelations) => loadChildren(folder))
   );
 }
 
