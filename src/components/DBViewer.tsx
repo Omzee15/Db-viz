@@ -182,7 +182,19 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange }: DB
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [isInteractive, setIsInteractive] = useState(true);
+  const [lockWarning, setLockWarning] = useState(false);
   const isRestoring = useRef(false);
+  const lockWarningTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  // Show lock warning when trying to interact with locked canvas
+  const handleLockedInteraction = () => {
+    if (!isInteractive) {
+      setLockWarning(true);
+      if (lockWarningTimeout.current) clearTimeout(lockWarningTimeout.current);
+      lockWarningTimeout.current = setTimeout(() => setLockWarning(false), 2000);
+    }
+  };
   const prevDbmlContent = useRef(dbmlContent);
   const searchRef = useRef<HTMLDivElement>(null);
   const { fitView, getViewport, setCenter } = useReactFlow();
@@ -515,8 +527,15 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange }: DB
       <div className="flex-1 relative" style={{ background: '#F5EFE7' }}>
         {error && (
           <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-50">
-            <div className="px-4 py-2 rounded-lg text-sm shadow-sm" style={{ background: 'rgba(196, 117, 108, 0.15)', border: '1px solid #C4756C', color: '#C4756C' }}>
+            <div className="rounded-lg text-sm shadow-sm" style={{ background: 'rgba(196, 117, 108, 0.15)', border: '1px solid #C4756C', color: '#C4756C', padding: '12px 20px' }}>
               {error}
+            </div>
+          </div>
+        )}
+        {lockWarning && (
+          <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-50">
+            <div className="rounded-lg text-sm shadow-sm" style={{ background: 'rgba(158, 142, 88, 0.15)', border: '1px solid #9E8E58', color: '#9E8E58', padding: '12px 20px' }}>
+              Canvas is locked
             </div>
           </div>
         )}
@@ -529,23 +548,35 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange }: DB
           nodeTypes={nodeTypes}
           fitView
           proOptions={{ hideAttribution: true }}
+          panOnDrag={isInteractive}
+          zoomOnScroll={isInteractive}
+          zoomOnPinch={isInteractive}
+          zoomOnDoubleClick={isInteractive}
+          nodesDraggable={isInteractive}
+          nodesConnectable={isInteractive}
+          elementsSelectable={isInteractive}
+          onPaneClick={handleLockedInteraction}
+          onPaneMouseMove={!isInteractive ? handleLockedInteraction : undefined}
         >
           <Background color="#D9CDBF" gap={16} size={1} />
-          <Controls 
-            style={{ 
-              background: '#E8DFD0', 
-              border: '1px solid #D9CDBF',
-              borderRadius: '8px',
-            }}
-          />
-
-          <Panel
-            position="bottom-right"
-            className="px-3 py-2 rounded-lg shadow-sm"
-            style={{ background: '#E8DFD0', border: '1px solid #D9CDBF' }}
-          >
-            <div className="text-xs" style={{ color: '#8B7355' }}>
-              Tables: {nodes.length} | Relations: {edges.length}
+          
+          <Panel position="bottom-right" style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-end' }}>
+            <Controls 
+              style={{ 
+                background: '#E8DFD0', 
+                border: '1px solid #D9CDBF',
+                borderRadius: '8px',
+                position: 'static',
+              }}
+              onInteractiveChange={(interactive) => setIsInteractive(interactive)}
+            />
+            <div
+              className="rounded-lg shadow-sm"
+              style={{ background: '#E8DFD0', border: '1px solid #D9CDBF', padding: '10px 16px' }}
+            >
+              <div className="text-xs font-medium" style={{ color: '#8B7355' }}>
+                Tables: {nodes.length} | Relations: {edges.length}
+              </div>
             </div>
           </Panel>
         </ReactFlow>

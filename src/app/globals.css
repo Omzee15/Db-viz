@@ -74,6 +74,36 @@ body {
   stroke-width: 2;
 }
 
+.react-flow__controls-button {
+  fill: #9E8E58 !important;
+  color: #9E8E58 !important;
+  border-bottom: 1px solid #D9CDBF !important;
+}
+
+.react-flow__controls-button svg {
+  fill: #9E8E58 !important;
+}
+
+.react-flow__controls-button svg path {
+  fill: #9E8E58 !important;
+  stroke: #9E8E58 !important;
+}
+
+.react-flow__controls-button:hover {
+  background: #EBE3D5 !important;
+}
+
+.react-flow__controls-fitview {
+  display: none !important;
+}
+
+.react-flow__controls {
+  position: static !important;
+  transform: none !important;
+  left: auto !important;
+  bottom: auto !important;
+}
+
 /* Scrollbar styles */
 ::-webkit-scrollbar {
   width: 8px;
