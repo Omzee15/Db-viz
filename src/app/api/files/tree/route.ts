@@ -51,7 +51,7 @@ async function getFolderTree(userId: string): Promise<FolderWithRelations[]> {
     });
 
     const childrenWithNested = await Promise.all(
-      children.map((child: FolderWithRelations) => loadChildren(child))
+      children.map((child) => loadChildren(child as unknown as FolderWithRelations))
     );
 
     return {
@@ -61,7 +61,7 @@ async function getFolderTree(userId: string): Promise<FolderWithRelations[]> {
   };
 
   return Promise.all(
-    rootFolders.map((folder: FolderWithRelations) => loadChildren(folder))
+    rootFolders.map((folder) => loadChildren(folder as unknown as FolderWithRelations))
   );
 }
 
