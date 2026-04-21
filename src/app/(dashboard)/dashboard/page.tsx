@@ -286,13 +286,16 @@ export default function DashboardPage() {
         padding: '8px 12px',
         paddingLeft: type === 'file' ? `${32 + depth * 16}px` : `${16 + depth * 16}px`,
         background: '#EBE3D5',
-        marginBottom: '4px'
+        marginBottom: '4px',
+        width: '100%',
+        boxSizing: 'border-box',
+        overflow: 'hidden'
       }}
     >
       {type === 'folder' ? (
-        <Folder className="h-4 w-4" style={{ color: '#9B8F5E' }} />
+        <Folder className="h-4 w-4" style={{ color: '#9B8F5E', flexShrink: 0 }} />
       ) : (
-        <FileText className="h-4 w-4" style={{ color: '#9B8F5E' }} />
+        <FileText className="h-4 w-4" style={{ color: '#9B8F5E', flexShrink: 0 }} />
       )}
       <input
         type="text"
@@ -300,8 +303,8 @@ export default function DashboardPage() {
         onChange={(e) => setNewItemName(e.target.value)}
         placeholder={type === 'folder' ? 'Folder name' : 'filename.dbml or .sql'}
         autoFocus
-        className="flex-1 text-sm rounded border-0 focus:outline-none"
-        style={{ background: '#F5EEE5', color: '#3E2723', padding: '4px 8px' }}
+        className="text-sm rounded border-0 focus:outline-none"
+        style={{ background: '#F5EEE5', color: '#3E2723', padding: '4px 8px', flex: 1, minWidth: 0, width: '100%' }}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
             type === 'folder' ? handleCreateFolder(newItemName) : handleCreateFile(newItemName);
@@ -651,10 +654,10 @@ Table users {
                     
                     {/* Empty state */}
                     {folders.length === 0 && rootFiles.length === 0 && !isCreatingFile && !isCreatingFolder && (
-                      <div className="text-center py-8" style={{ color: '#8B7355' }}>
-                        <FileText className="h-10 w-10 mx-auto mb-2 opacity-50" />
-                        <p className="text-xs">No files yet</p>
-                        <p className="text-xs mt-1">Create your first DBML file</p>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '32px 0', color: '#8B7355' }}>
+                        <FileText style={{ width: '48px', height: '48px', marginBottom: '10px', opacity: 0.5 }} />
+                        <p style={{ fontSize: '14px', fontWeight: 500, marginBottom: '4px' }}>No files yet</p>
+                        <p style={{ fontSize: '12px' }}>Create your first DBML file</p>
                       </div>
                     )}
                   </>
@@ -684,10 +687,10 @@ Table users {
               </div>
               
               <div className="flex-1 flex items-center justify-center" style={{ background: '#F5EFE7' }}>
-                <div className="flex flex-col items-center text-center">
-                  <Database className="h-16 w-16 mb-6 opacity-30" style={{ color: '#8B7355' }} />
-                  <h2 className="text-lg font-medium mb-3" style={{ color: '#3E2723' }}>Select a file</h2>
-                  <p className="text-sm" style={{ color: '#8B7355' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+                  <Database style={{ width: '64px', height: '64px', marginBottom: '12px', opacity: 0.3, color: '#8B7355' }} />
+                  <h2 style={{ fontSize: '20px', fontWeight: 500, marginBottom: '8px', color: '#3E2723' }}>Select a file</h2>
+                  <p style={{ fontSize: '14px', color: '#8B7355' }}>
                     Choose a DBML file from the sidebar to view its diagram
                   </p>
                 </div>
