@@ -49,6 +49,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Validate file extension
+    const validExtensions = [".dbml", ".sql"];
+    const hasValidExtension = validExtensions.some(ext => name.toLowerCase().endsWith(ext));
+    if (!hasValidExtension) {
+      return NextResponse.json(
+        { success: false, error: "Invalid file extension. Only .dbml and .sql files are allowed" },
+        { status: 400 }
+      );
+    }
+
     if (folderId) {
       const folder = await prisma.folder.findFirst({
         where: { id: folderId, userId: session.userId, isActive: true },

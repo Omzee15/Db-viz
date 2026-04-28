@@ -18,7 +18,7 @@ export async function GET(
     const { id } = await params;
 
     const folder = await prisma.folder.findFirst({
-      where: { id, userId: session.userId, isActive: true },
+      where: { id, isActive: true },
       include: {
         files: { where: { isActive: true } },
         children: { where: { isActive: true } },
@@ -30,6 +30,19 @@ export async function GET(
         { success: false, error: "Folder not found" },
         { status: 404 }
       );
+    }
+
+    const isOwner = folder.userId === session.userId;
+    if (!isOwner) {
+      const share = await prisma.folderShare.findUnique({
+        where: { folderId_sharedWithId: { folderId: id, sharedWithId: session.userId } },
+      });
+      if (!share) {
+        return NextResponse.json(
+          { success: false, error: "Folder not found" },
+          { status: 404 }
+        );
+      }
     }
 
     return NextResponse.json({ success: true, data: folder });
@@ -59,7 +72,7 @@ export async function PUT(
     const { name } = await request.json();
 
     const folder = await prisma.folder.findFirst({
-      where: { id, userId: session.userId, isActive: true },
+      where: { id, isActive: true },
     });
 
     if (!folder) {
@@ -67,6 +80,19 @@ export async function PUT(
         { success: false, error: "Folder not found" },
         { status: 404 }
       );
+    }
+
+    const isOwner = folder.userId === session.userId;
+    if (!isOwner) {
+      const share = await prisma.folderShare.findUnique({
+        where: { folderId_sharedWithId: { folderId: id, sharedWithId: session.userId } },
+      });
+      if (!share || !share.canWrite) {
+        return NextResponse.json(
+          { success: false, error: "No write access" },
+          { status: 403 }
+        );
+      }
     }
 
     const updatedFolder = await prisma.folder.update({

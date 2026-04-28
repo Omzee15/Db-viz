@@ -1,6 +1,5 @@
 generator client {
   provider = "prisma-client-js"
-  output   = "../node_modules/.prisma/client"
 }
 
 datasource db {
@@ -17,38 +16,74 @@ model User {
   updatedAt    DateTime @updatedAt @map("updated_at")
   folders      Folder[]
   files        File[]
+  filesSharedWithMe   FileShare[]   @relation("FilesSharedWithMe")
+  filesSharedByMe     FileShare[]   @relation("FilesSharedByMe")
+  foldersSharedWithMe FolderShare[] @relation("FoldersSharedWithMe")
+  foldersSharedByMe   FolderShare[] @relation("FoldersSharedByMe")
 
   @@map("users")
 }
 
 model Folder {
-  id             String   @id @default(uuid())
+  id             String        @id @default(uuid())
   name           String
-  userId         String   @map("user_id")
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  parentFolderId String?  @map("parent_folder_id")
-  parentFolder   Folder?  @relation("FolderToFolder", fields: [parentFolderId], references: [id], onDelete: Cascade)
-  children       Folder[] @relation("FolderToFolder")
+  userId         String        @map("user_id")
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parentFolderId String?       @map("parent_folder_id")
+  parentFolder   Folder?       @relation("FolderToFolder", fields: [parentFolderId], references: [id], onDelete: Cascade)
+  children       Folder[]      @relation("FolderToFolder")
   files          File[]
-  isActive       Boolean  @default(true) @map("is_active")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  shares         FolderShare[]
+  isActive       Boolean       @default(true) @map("is_active")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
 
   @@map("folders")
 }
 
 model File {
-  id         String   @id @default(uuid())
+  id         String      @id @default(uuid())
   name       String
-  content    String   @default("")
-  layoutData String   @default("{}") @map("layout_data") @db.Text
-  userId     String   @map("user_id")
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  folderId   String?  @map("folder_id")
-  folder     Folder?  @relation(fields: [folderId], references: [id], onDelete: Cascade)
-  isActive   Boolean  @default(true) @map("is_active")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
+  content    String      @default("") @db.Text
+  layoutData String      @default("{}") @map("layout_data") @db.Text
+  userId     String      @map("user_id")
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  folderId   String?     @map("folder_id")
+  folder     Folder?     @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  shares     FileShare[]
+  isActive   Boolean     @default(true) @map("is_active")
+  createdAt  DateTime    @default(now()) @map("created_at")
+  updatedAt  DateTime    @updatedAt @map("updated_at")
 
   @@map("files")
+}
+
+model FileShare {
+  id           String   @id @default(uuid())
+  fileId       String   @map("file_id")
+  file         File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  sharedWithId String   @map("shared_with_id")
+  sharedWith   User     @relation("FilesSharedWithMe", fields: [sharedWithId], references: [id], onDelete: Cascade)
+  sharedById   String   @map("shared_by_id")
+  sharedBy     User     @relation("FilesSharedByMe", fields: [sharedById], references: [id], onDelete: Cascade)
+  canWrite     Boolean  @default(false) @map("can_write")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@unique([fileId, sharedWithId])
+  @@map("file_shares")
+}
+
+model FolderShare {
+  id           String   @id @default(uuid())
+  folderId     String   @map("folder_id")
+  folder       Folder   @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  sharedWithId String   @map("shared_with_id")
+  sharedWith   User     @relation("FoldersSharedWithMe", fields: [sharedWithId], references: [id], onDelete: Cascade)
+  sharedById   String   @map("shared_by_id")
+  sharedBy     User     @relation("FoldersSharedByMe", fields: [sharedById], references: [id], onDelete: Cascade)
+  canWrite     Boolean  @default(false) @map("can_write")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@unique([folderId, sharedWithId])
+  @@map("folder_shares")
 }

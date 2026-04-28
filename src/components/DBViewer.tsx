@@ -17,7 +17,7 @@ import {
   type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Parser } from "@dbml/core";
+import { Parser, importer } from "@dbml/core";
 import {
   Database,
   ZoomIn,
@@ -287,6 +287,72 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange }: DB
     [setNodes, fitView]
   );
 
+  // Preprocess DBML to remove unsupported syntax and clean up whitespace
+  const preprocessDBML = (content: string): string => {
+    const lines = content.split('\n');
+    const result: string[] = [];
+    let insideProjectBlock = false;
+    let braceCount = 0;
+    let lastLineWasEmpty = false;
+    let insideBlock = false;
+    let blockBraceCount = 0;
+    
+    for (const line of lines) {
+      // Trim the line and remove any non-standard whitespace
+      const cleanedLine = line.replace(/[\u00A0\u2000-\u200B\u202F\u205F\u3000]/g, ' ');
+      const trimmedLine = cleanedLine.trim();
+      
+      // Check if this line starts a Project block
+      if (!insideProjectBlock && /^Project\s+\w+\s*\{?/i.test(trimmedLine)) {
+        insideProjectBlock = true;
+        braceCount = (cleanedLine.match(/\{/g) || []).length - (cleanedLine.match(/\}/g) || []).length;
+        if (braceCount <= 0) {
+          insideProjectBlock = false;
+          braceCount = 0;
+        }
+        continue;
+      }
+      
+      // If inside Project block, track braces
+      if (insideProjectBlock) {
+        braceCount += (cleanedLine.match(/\{/g) || []).length;
+        braceCount -= (cleanedLine.match(/\}/g) || []).length;
+        if (braceCount <= 0) {
+          insideProjectBlock = false;
+          braceCount = 0;
+        }
+        continue;
+      }
+      
+      // Track if we're inside a block (table, enum, etc.)
+      const openBraces = (cleanedLine.match(/\{/g) || []).length;
+      const closeBraces = (cleanedLine.match(/\}/g) || []).length;
+      blockBraceCount += openBraces - closeBraces;
+      insideBlock = blockBraceCount > 0;
+      
+      // Skip blank lines inside blocks - parser doesn't like them
+      if (trimmedLine === '' && insideBlock) {
+        continue;
+      }
+      
+      // Skip consecutive empty lines outside blocks
+      if (trimmedLine === '') {
+        if (lastLineWasEmpty) {
+          continue;
+        }
+        lastLineWasEmpty = true;
+        result.push('');
+      } else {
+        lastLineWasEmpty = false;
+        result.push(cleanedLine);
+      }
+    }
+    
+    // Remove leading/trailing empty lines and join
+    const finalResult = result.join('\n').trim();
+    return finalResult;
+  };
+
   const parseDBML = useCallback(
     async (content: string, layout?: string) => {
       if (!content.trim()) return;
@@ -295,8 +361,37 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange }: DB
       setError(null);
 
       try {
+        let dbmlContent: string;
+        const isSqlFile = fileName.toLowerCase().endsWith('.sql');
+        
+        if (isSqlFile) {
+          // Convert SQL to DBML first
+          console.log('Detected SQL file, converting to DBML...');
+          try {
+            // Try PostgreSQL first (most common)
+            dbmlContent = importer.import(content, 'postgres');
+          } catch {
+            try {
+              // Fallback to MySQL
+              dbmlContent = importer.import(content, 'mysql');
+            } catch {
+              // Last resort: try legacy postgres
+              dbmlContent = importer.import(content, 'postgresLegacy');
+            }
+          }
+          console.log('Converted SQL to DBML:', dbmlContent);
+        } else {
+          // Preprocess DBML to remove unsupported syntax
+          dbmlContent = preprocessDBML(content);
+        }
+        
+        // Debug: log processed content
+        console.log('Final DBML content to parse:');
+        console.log(dbmlContent);
+        console.log('---');
+        
         const parser = new Parser();
-        const database = parser.parse(content, "dbml");
+        const database = parser.parse(dbmlContent, "dbml");
 
         const foreignKeys = new Set<string>();
         database.schemas[0]?.refs?.forEach((ref) => {
@@ -382,14 +477,26 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange }: DB
         setEdges(relationshipEdges);
       } catch (err) {
         console.error("Error parsing DBML:", err);
-        setError(
-          err instanceof Error ? err.message : "Failed to parse DBML content"
-        );
+        let errorMessage = "Failed to parse DBML content";
+        if (err instanceof Error) {
+          errorMessage = err.message;
+        } else if (err && typeof err === 'object') {
+          // Handle DBML parser errors which may have different structure
+          if ('message' in err) {
+            errorMessage = String((err as { message: unknown }).message);
+          } else if ('dipiag' in err || 'location' in err) {
+            // DBML specific error format
+            errorMessage = JSON.stringify(err, null, 2);
+          } else {
+            errorMessage = JSON.stringify(err);
+          }
+        }
+        setError(errorMessage);
       } finally {
         setIsLoading(false);
       }
     },
-    [fitView, restoreLayout, setEdges, setNodes]
+    [fitView, restoreLayout, setEdges, setNodes, fileName]
   );
 
   const handleNodesChange = useCallback(

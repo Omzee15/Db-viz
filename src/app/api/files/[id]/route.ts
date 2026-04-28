@@ -18,7 +18,7 @@ export async function GET(
     const { id } = await params;
 
     const file = await prisma.file.findFirst({
-      where: { id, userId: session.userId, isActive: true },
+      where: { id, isActive: true },
     });
 
     if (!file) {
@@ -26,6 +26,32 @@ export async function GET(
         { success: false, error: "File not found" },
         { status: 404 }
       );
+    }
+
+    const isOwner = file.userId === session.userId;
+    if (!isOwner) {
+      const share = await prisma.fileShare.findUnique({
+        where: { fileId_sharedWithId: { fileId: id, sharedWithId: session.userId } },
+      });
+      if (!share) {
+        const folderShare = file.folderId
+          ? await prisma.folderShare.findUnique({
+              where: {
+                folderId_sharedWithId: {
+                  folderId: file.folderId,
+                  sharedWithId: session.userId,
+                },
+              },
+            })
+          : null;
+
+        if (!folderShare) {
+          return NextResponse.json(
+            { success: false, error: "File not found" },
+            { status: 404 }
+          );
+        }
+      }
     }
 
     return NextResponse.json({ success: true, data: file });
@@ -55,7 +81,7 @@ export async function PUT(
     const { name, content, layoutData, folderId } = await request.json();
 
     const file = await prisma.file.findFirst({
-      where: { id, userId: session.userId, isActive: true },
+      where: { id, isActive: true },
     });
 
     if (!file) {
@@ -63,6 +89,32 @@ export async function PUT(
         { success: false, error: "File not found" },
         { status: 404 }
       );
+    }
+
+    const isOwner = file.userId === session.userId;
+    if (!isOwner) {
+      const share = await prisma.fileShare.findUnique({
+        where: { fileId_sharedWithId: { fileId: id, sharedWithId: session.userId } },
+      });
+      if (!share || !share.canWrite) {
+        const folderShare = file.folderId
+          ? await prisma.folderShare.findUnique({
+              where: {
+                folderId_sharedWithId: {
+                  folderId: file.folderId,
+                  sharedWithId: session.userId,
+                },
+              },
+            })
+          : null;
+
+        if (!folderShare || !folderShare.canWrite) {
+          return NextResponse.json(
+            { success: false, error: "No write access" },
+            { status: 403 }
+          );
+        }
+      }
     }
 
     const updateData: {
@@ -75,7 +127,7 @@ export async function PUT(
     if (name !== undefined) updateData.name = name;
     if (content !== undefined) updateData.content = content;
     if (layoutData !== undefined) updateData.layoutData = layoutData;
-    if (folderId !== undefined) updateData.folderId = folderId;
+    if (folderId !== undefined && isOwner) updateData.folderId = folderId;
 
     const updatedFile = await prisma.file.update({
       where: { id },

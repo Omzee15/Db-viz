@@ -10,7 +10,7 @@
     "postinstall": "prisma generate"
   },
   "dependencies": {
-    "@dbml/core": "^7.1.1",
+    "@dbml/core": "^3.14.1",
     "@neondatabase/serverless": "^1.1.0",
     "@prisma/adapter-neon": "^7.7.0",
     "@prisma/adapter-pg": "^7.7.0",

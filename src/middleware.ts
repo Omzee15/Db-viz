@@ -6,7 +6,7 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Public routes that don't require authentication
-  const publicRoutes = ["/login", "/api/auth/login", "/api/auth/register"];
+  const publicRoutes = ["/login", "/api/auth/login", "/api/auth/register", "/api/health"];
   
   if (publicRoutes.some((route) => pathname.startsWith(route))) {
     // If user is authenticated and trying to access login, redirect to dashboard
@@ -19,6 +19,12 @@ export async function middleware(request: NextRequest) {
         }
       }
     }
+    return NextResponse.next();
+  }
+
+  // Check for guest mode cookie - allow dashboard access for guests
+  const guestMode = request.cookies.get("guestMode")?.value;
+  if (guestMode === "true" && pathname.startsWith("/dashboard")) {
     return NextResponse.next();
   }
 

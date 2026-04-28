@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2 } from "lucide-react";
+import { Loader2, UserCircle } from "lucide-react";
+import { useGuest } from "@/lib/guest-context";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -12,6 +13,7 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const router = useRouter();
+  const { setGuestMode } = useGuest();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,6 +43,7 @@ export default function LoginPage() {
         localStorage.setItem("user", JSON.stringify(data.user));
       }
 
+      setGuestMode(false);
       router.push("/dashboard");
       router.refresh();
     } catch {
@@ -48,6 +51,12 @@ export default function LoginPage() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleGuestMode = () => {
+    setGuestMode(true);
+    localStorage.removeItem("user");
+    router.push("/dashboard");
   };
 
   return (
@@ -147,6 +156,33 @@ export default function LoginPage() {
               )}
             </button>
           </form>
+
+          <div style={{ marginTop: '16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ flex: 1, height: '1px', background: '#D9CDBF' }} />
+            <span className="text-xs" style={{ color: '#8B7355' }}>or</span>
+            <div style={{ flex: 1, height: '1px', background: '#D9CDBF' }} />
+          </div>
+
+          <button
+            type="button"
+            onClick={handleGuestMode}
+            className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 w-full"
+            style={{ 
+              marginTop: '16px',
+              background: 'transparent', 
+              border: '1px solid #9B8F5E',
+              color: '#9B8F5E',
+              height: '36px', 
+              padding: '6px 16px' 
+            }}
+          >
+            <UserCircle className="h-4 w-4" />
+            Continue as guest
+          </button>
+
+          <p className="text-xs text-center" style={{ marginTop: '8px', color: '#8B7355' }}>
+            Guest files are stored locally and will be lost when you close the tab
+          </p>
 
           <div style={{ marginTop: '16px', textAlign: 'center' }}>
             <button
