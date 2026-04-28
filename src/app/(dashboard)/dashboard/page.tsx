@@ -946,7 +946,7 @@ export default function DashboardPage() {
                   }}
                   placeholder={`// Define your database schema\nTable users {\n  id int [pk]\n  name varchar\n}`}
                   className="dbml-editor flex-1 text-sm font-mono resize-none focus:outline-none"
-                  style={{ background: "#F5EEE5", color: "#3E2723", padding: "16px 16px 16px 20px", border: "none", lineHeight: "1.5", whiteSpace: "nowrap", overflowX: "auto" }}
+                  style={{ background: "#F5EEE5", color: "#3E2723", padding: "16px 16px 16px 20px", border: "none", lineHeight: "1.5", whiteSpace: "pre", overflowX: "auto" }}
                   spellCheck={false}
                 />
               </div>
