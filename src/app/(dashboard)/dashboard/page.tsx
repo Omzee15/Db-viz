@@ -607,7 +607,7 @@ export default function DashboardPage() {
 
           {/* Shared indicator icons */}
           {folder.isSharedWithOthers && (
-            <Users className="h-3 w-3 flex-shrink-0" style={{ color: "#9B8F5E" }} title="Shared with others" />
+            <Users className="h-3 w-3 flex-shrink-0" style={{ color: "#9B8F5E" }} aria-label="Shared with others" />
           )}
           {folder.isSharedWithMe && (
             <span
@@ -719,7 +719,7 @@ export default function DashboardPage() {
 
         {/* Shared indicator icons */}
         {file.isSharedWithOthers && (
-          <Users className="h-3 w-3 flex-shrink-0" style={{ color: "#9B8F5E" }} title="Shared with others" />
+          <Users className="h-3 w-3 flex-shrink-0" style={{ color: "#9B8F5E" }} aria-label="Shared with others" />
         )}
         {file.isSharedWithMe && (
           <span
