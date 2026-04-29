@@ -47,6 +47,7 @@ interface DBViewerProps {
   fileName: string;
   layoutData: string;
   onLayoutChange: (layoutData: string) => void;
+  onTableSelect?: (tableName: string) => void;
 }
 
 // Custom Table Node Component - Solarized Light theme like Project-Nest
@@ -174,7 +175,7 @@ const nodeTypes = {
 };
 
 // Inner component that uses ReactFlow hooks
-function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange }: DBViewerProps) {
+function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTableSelect }: DBViewerProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<TableNodeType>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [error, setError] = useState<string | null>(null);
@@ -353,6 +354,18 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange }: DB
     return finalResult;
   };
 
+  const preprocessSQLForImport = (content: string): string => {
+    const withoutBlockComments = content.replace(/\/\*[\s\S]*?\*\//g, "");
+    const withoutLineComments = withoutBlockComments.replace(/--.*$/gm, "");
+    const statements = withoutLineComments.split(";");
+    const createTableStatements = statements
+      .map((stmt) => stmt.trim())
+      .filter((stmt) => /^CREATE\s+TABLE\b/i.test(stmt));
+
+    if (createTableStatements.length === 0) return "";
+    return createTableStatements.join(";\n\n") + ";";
+  };
+
   const parseDBML = useCallback(
     async (content: string, layout?: string) => {
       if (!content.trim()) return;
@@ -368,15 +381,21 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange }: DB
           // Convert SQL to DBML first
           console.log('Detected SQL file, converting to DBML...');
           try {
+            const sanitizedSql = preprocessSQLForImport(content);
+            const sqlForImport = sanitizedSql.trim() ? sanitizedSql : content;
             // Try PostgreSQL first (most common)
-            dbmlContent = importer.import(content, 'postgres');
+            dbmlContent = importer.import(sqlForImport, 'postgres');
           } catch {
             try {
               // Fallback to MySQL
-              dbmlContent = importer.import(content, 'mysql');
+              const sanitizedSql = preprocessSQLForImport(content);
+              const sqlForImport = sanitizedSql.trim() ? sanitizedSql : content;
+              dbmlContent = importer.import(sqlForImport, 'mysql');
             } catch {
               // Last resort: try legacy postgres
-              dbmlContent = importer.import(content, 'postgresLegacy');
+              const sanitizedSql = preprocessSQLForImport(content);
+              const sqlForImport = sanitizedSql.trim() ? sanitizedSql : content;
+              dbmlContent = importer.import(sqlForImport, 'postgresLegacy');
             }
           }
           console.log('Converted SQL to DBML:', dbmlContent);
@@ -537,6 +556,7 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange }: DB
     const node = nodes.find((n) => n.id === tableId);
     if (node) {
       setCenter(node.position.x + 125, node.position.y + 100, { zoom: 1.2, duration: 500 });
+      onTableSelect?.(tableId);
       setSearchQuery("");
       setShowSearchDropdown(false);
       setSelectedIndex(0);

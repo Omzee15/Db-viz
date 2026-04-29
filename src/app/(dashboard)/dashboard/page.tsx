@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronDown,
+  ChevronUp,
   Folder,
   FolderOpen,
   FolderPlus,
@@ -96,6 +97,11 @@ export default function DashboardPage() {
   const [fileFilter, setFileFilter] = useState<FileFilter>("all");
   const [fileSearch, setFileSearch] = useState("");
   const [showCompactSearch, setShowCompactSearch] = useState(false);
+  const [showContentSearch, setShowContentSearch] = useState(false);
+  const [contentSearch, setContentSearch] = useState("");
+  const [lastMatchIndex, setLastMatchIndex] = useState(-1);
+  const contentSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const editorRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Loading states
   const [isCreatingFileLoading, setIsCreatingFileLoading] = useState(false);
@@ -141,7 +147,89 @@ export default function DashboardPage() {
       setFileLayoutData("");
       setHasChanges(false);
     }
+    setShowContentSearch(false);
+    setContentSearch("");
+    setLastMatchIndex(-1);
   }, [selectedFile?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const runContentSearch = (forceFromStart: boolean = false) => {
+    const query = contentSearch.trim();
+    if (!query || !editorRef.current) return;
+
+    const haystack = dbmlContent.toLowerCase();
+    const needle = query.toLowerCase();
+    const startIndex = forceFromStart || lastMatchIndex < 0 ? 0 : lastMatchIndex + 1;
+    let nextIndex = haystack.indexOf(needle, startIndex);
+
+    if (nextIndex === -1 && startIndex > 0) {
+      nextIndex = haystack.indexOf(needle, 0);
+    }
+
+    if (nextIndex === -1) return;
+
+    setLastMatchIndex(nextIndex);
+    const endIndex = nextIndex + needle.length;
+    editorRef.current.focus();
+    editorRef.current.setSelectionRange(nextIndex, endIndex);
+    scrollEditorToIndex(nextIndex);
+  };
+
+  const scrollEditorToIndex = (index: number) => {
+    if (!editorRef.current) return;
+    const lineHeightPx = 21;
+    const lineIndex = dbmlContent.slice(0, index).split("\n").length - 1;
+    const targetTop = Math.max(0, lineIndex * lineHeightPx - editorRef.current.clientHeight / 2);
+    editorRef.current.scrollTop = targetTop;
+  };
+
+  const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  const findTableDefinitionIndex = (content: string, tableName: string) => {
+    const escaped = escapeRegex(tableName);
+    const patterns = [
+      new RegExp("\\bTable\\s+[\"`]?" + escaped + "[\"`]?\\s*\\{", "i"),
+      new RegExp("\\bCREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?[\"`]?" + escaped + "[\"`]?", "i"),
+    ];
+
+    for (const pattern of patterns) {
+      const match = pattern.exec(content);
+      if (match?.index !== undefined) return match.index;
+    }
+    return -1;
+  };
+
+
+
+  const handleTableSelect = (tableName: string) => {
+    const index = findTableDefinitionIndex(dbmlContent, tableName);
+    if (index < 0 || !editorRef.current) return;
+    const endIndex = Math.min(dbmlContent.length, index + tableName.length + 16);
+    editorRef.current.focus();
+    editorRef.current.setSelectionRange(index, endIndex);
+    scrollEditorToIndex(index);
+  };
+
+  const runContentSearchPrev = () => {
+    const query = contentSearch.trim();
+    if (!query || !editorRef.current) return;
+
+    const haystack = dbmlContent.toLowerCase();
+    const needle = query.toLowerCase();
+    const startIndex = lastMatchIndex <= 0 ? haystack.length - 1 : lastMatchIndex - 1;
+    let prevIndex = haystack.lastIndexOf(needle, startIndex);
+
+    if (prevIndex === -1 && startIndex < haystack.length - 1) {
+      prevIndex = haystack.lastIndexOf(needle, haystack.length - 1);
+    }
+
+    if (prevIndex === -1) return;
+
+    setLastMatchIndex(prevIndex);
+    const endIndex = prevIndex + needle.length;
+    editorRef.current.focus();
+    editorRef.current.setSelectionRange(prevIndex, endIndex);
+    scrollEditorToIndex(prevIndex);
+  };
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -899,6 +987,17 @@ export default function DashboardPage() {
                 <span className="text-sm font-medium truncate flex-1" style={{ color: "#3E2723" }}>
                   {selectedFile.name}
                 </span>
+                <button
+                  onClick={() => {
+                    setShowContentSearch((prev) => !prev);
+                    setTimeout(() => contentSearchInputRef.current?.focus(), 0);
+                  }}
+                  className="rounded-md hover:opacity-80"
+                  style={{ background: "#EBE3D5", padding: "6px" }}
+                  title="Search in file"
+                >
+                  <Search className="h-4 w-4" style={{ color: "#8B7355" }} />
+                </button>
                 {selectedFile.isSharedWithMe && (
                   <span
                     className="text-xs rounded"
@@ -914,6 +1013,63 @@ export default function DashboardPage() {
                   </span>
                 )}
               </div>
+
+              {showContentSearch && (
+                <div className="flex items-center gap-2" style={{ padding: "10px 16px", borderBottom: "1px solid #D9CDBF" }}>
+                  <input
+                    ref={contentSearchInputRef}
+                    value={contentSearch}
+                    onChange={(e) => {
+                      setContentSearch(e.target.value);
+                      setLastMatchIndex(-1);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        if (e.shiftKey) {
+                          runContentSearchPrev();
+                        } else {
+                          runContentSearch();
+                        }
+                      }
+                    }}
+                    placeholder="Search in file"
+                    className="text-xs rounded-md focus:outline-none"
+                    style={{
+                      background: "#F5EEE5",
+                      color: "#3E2723",
+                      border: "1px solid #D9CDBF",
+                      padding: "10px 12px",
+                      height: "36px",
+                      flex: 1,
+                      minWidth: 0,
+                    }}
+                  />
+                  <button
+                    onClick={() => runContentSearchPrev()}
+                    className="rounded-md hover:opacity-80"
+                    style={{ background: "#EBE3D5", padding: "6px" }}
+                    title="Find previous"
+                  >
+                    <ChevronUp className="h-4 w-4" style={{ color: "#8B7355" }} />
+                  </button>
+                  <button
+                    onClick={() => runContentSearch()}
+                    className="rounded-md hover:opacity-80"
+                    style={{ background: "#EBE3D5", padding: "6px" }}
+                    title="Find next"
+                  >
+                    <ChevronDown className="h-4 w-4" style={{ color: "#8B7355" }} />
+                  </button>
+                  <button
+                    onClick={() => runContentSearch(true)}
+                    className="rounded-md hover:opacity-80"
+                    style={{ background: "#EBE3D5", padding: "6px" }}
+                    title="Find from start"
+                  >
+                    <Search className="h-4 w-4" style={{ color: "#8B7355" }} />
+                  </button>
+                </div>
+              )}
 
               <div className="flex-1 flex overflow-hidden">
                 <style>{`
@@ -934,6 +1090,7 @@ export default function DashboardPage() {
                   {dbmlContent === "" && <div style={{ lineHeight: "1.5" }}>1</div>}
                 </div>
                 <textarea
+                  ref={editorRef}
                   value={dbmlContent}
                   onChange={(e) => {
                     setDbmlContent(e.target.value);
@@ -1118,6 +1275,7 @@ export default function DashboardPage() {
               fileName={selectedFile.name}
               layoutData={fileLayoutData}
               onLayoutChange={handleLayoutChange}
+              onTableSelect={handleTableSelect}
             />
           ) : (
             <div className="h-full flex flex-col">
