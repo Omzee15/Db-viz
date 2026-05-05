@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2, UserCircle } from "lucide-react";
 import { useGuest } from "@/lib/guest-context";
 
@@ -13,6 +13,8 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const shareToken = searchParams.get("shareToken");
   const { setGuestMode } = useGuest();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -44,6 +46,16 @@ export default function LoginPage() {
       }
 
       setGuestMode(false);
+
+      // If came from a public share link, claim it (add user to share list)
+      if (shareToken) {
+        try {
+          await fetch(`/api/share/${shareToken}/claim`, { method: "POST" });
+        } catch {
+          // ignore claim errors, still redirect to dashboard
+        }
+      }
+
       router.push("/dashboard");
       router.refresh();
     } catch {
@@ -76,6 +88,11 @@ export default function LoginPage() {
               ? "Enter your details to create your account"
               : "Enter your credentials to access your projects"}
           </p>
+          {shareToken && (
+            <div className="text-xs text-center rounded-md" style={{ marginTop: '12px', padding: '10px 14px', background: '#F5EEE5', color: '#8B7355', border: '1px solid #D9CDBF' }}>
+              Sign in to save this shared visualization to your account
+            </div>
+          )}
         </div>
 
         {/* CardContent */}

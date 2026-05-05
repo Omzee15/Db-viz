@@ -2,7 +2,7 @@
 
 import { useState, useEffect, use } from "react";
 import DBViewer from "@/components/DBViewer";
-import { Database, User, Loader2, AlertTriangle, FileText, Folder } from "lucide-react";
+import { Database, User, Loader2, AlertTriangle, FileText, Folder, LogIn } from "lucide-react";
 
 interface SharedFile {
   id: string;
@@ -129,11 +129,21 @@ export default function PublicSharePage({
             View Only
           </span>
         </div>
-        <div className="flex items-center gap-3">
-          <User className="h-5 w-5" style={{ color: "#8B7355" }} />
-          <span className="text-sm" style={{ color: "#8B7355" }}>
-            Shared by {data.ownerName}
-          </span>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <User className="h-5 w-5" style={{ color: "#8B7355" }} />
+            <span className="text-sm" style={{ color: "#8B7355" }}>
+              Shared by {data.ownerName}
+            </span>
+          </div>
+          <a
+            href={`/login?shareToken=${token}`}
+            className="flex items-center gap-2 text-sm rounded-lg hover:opacity-90"
+            style={{ background: "#9B8F5E", color: "#FFFFFF", padding: "10px 18px" }}
+          >
+            <LogIn className="h-4 w-4" />
+            Login
+          </a>
         </div>
       </header>
 
