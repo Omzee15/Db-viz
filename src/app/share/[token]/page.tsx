@@ -110,27 +110,27 @@ export default function PublicSharePage({
     <div className="min-h-screen flex flex-col" style={{ background: "#FAF7F2" }}>
       {/* Header */}
       <header
-        className="flex items-center justify-between px-6 py-4 border-b"
-        style={{ background: "#FFFFFF", borderColor: "#D9CDBF" }}
+        className="flex items-center justify-between border-b"
+        style={{ background: "#FFFFFF", borderColor: "#D9CDBF", padding: "16px 32px" }}
       >
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
           {data.type === "folder" ? (
-            <Folder className="h-5 w-5" style={{ color: "#9B8F5E" }} />
+            <Folder className="h-6 w-6" style={{ color: "#9B8F5E" }} />
           ) : (
-            <Database className="h-5 w-5" style={{ color: "#9B8F5E" }} />
+            <Database className="h-6 w-6" style={{ color: "#9B8F5E" }} />
           )}
-          <h1 className="text-base font-semibold" style={{ color: "#3E2723" }}>
+          <h1 className="text-lg font-semibold" style={{ color: "#3E2723" }}>
             {data.name}
           </h1>
           <span
-            className="text-xs px-2 py-1 rounded"
-            style={{ background: "#F5EEE5", color: "#8B7355" }}
+            className="text-xs rounded"
+            style={{ background: "#F5EEE5", color: "#8B7355", padding: "6px 12px" }}
           >
             View Only
           </span>
         </div>
-        <div className="flex items-center gap-2">
-          <User className="h-4 w-4" style={{ color: "#8B7355" }} />
+        <div className="flex items-center gap-3">
+          <User className="h-5 w-5" style={{ color: "#8B7355" }} />
           <span className="text-sm" style={{ color: "#8B7355" }}>
             Shared by {data.ownerName}
           </span>
