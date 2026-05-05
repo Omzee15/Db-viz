@@ -6,7 +6,7 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Public routes that don't require authentication
-  const publicRoutes = ["/login", "/api/auth/login", "/api/auth/register", "/api/health"];
+  const publicRoutes = ["/login", "/api/auth/login", "/api/auth/register", "/api/health", "/share", "/api/share"];
   
   if (publicRoutes.some((route) => pathname.startsWith(route))) {
     // If user is authenticated and trying to access login, redirect to dashboard

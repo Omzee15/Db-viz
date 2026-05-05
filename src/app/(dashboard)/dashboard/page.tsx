@@ -25,6 +25,9 @@ import {
   Users,
   X,
   Search,
+  Globe,
+  Copy,
+  Check,
 } from "lucide-react";
 import DBViewer from "@/components/DBViewer";
 import { useGuest } from "@/lib/guest-context";
@@ -124,6 +127,9 @@ export default function DashboardPage() {
   const [shareError, setShareError] = useState("");
   const [shareUserResults, setShareUserResults] = useState<UserInfo[]>([]);
   const [isSearchingUsers, setIsSearchingUsers] = useState(false);
+  const [publicLink, setPublicLink] = useState<string | null>(null);
+  const [isGeneratingPublicLink, setIsGeneratingPublicLink] = useState(false);
+  const [publicLinkCopied, setPublicLinkCopied] = useState(false);
 
   const isSidebarCompact = sidebarWidth <= 170;
 
@@ -605,11 +611,21 @@ export default function DashboardPage() {
     setShareCanWrite(false);
     setShareError("");
     setShareUserResults([]);
+    setPublicLink(null);
+    setPublicLinkCopied(false);
     setIsLoadingShares(true);
     try {
       const res = await fetch(`/api/${type === "file" ? "files" : "folders"}/${id}/share`);
       const data = await res.json();
       if (res.ok) setShareModalShares(data.data);
+      
+      // Fetch public link status
+      const endpoint = type === "file" ? "files" : "folders";
+      const publicRes = await fetch(`/api/${endpoint}/${id}/public`);
+      const publicData = await publicRes.json();
+      if (publicRes.ok && publicData.data?.publicToken) {
+        setPublicLink(`${window.location.origin}/share/${publicData.data.publicToken}`);
+      }
     } catch {
       // ignore
     } finally {
@@ -658,6 +674,45 @@ export default function DashboardPage() {
       }
     } catch {
       // ignore
+    }
+  };
+
+  const generatePublicLink = async () => {
+    if (!shareModal) return;
+    setIsGeneratingPublicLink(true);
+    try {
+      const endpoint = shareModal.type === "file" ? "files" : "folders";
+      const res = await fetch(`/api/${endpoint}/${shareModal.id}/public`, { method: "POST" });
+      const data = await res.json();
+      if (res.ok && data.data?.publicToken) {
+        const url = `${window.location.origin}/share/${data.data.publicToken}`;
+        setPublicLink(url);
+      }
+    } catch {
+      setShareError("Failed to generate public link");
+    } finally {
+      setIsGeneratingPublicLink(false);
+    }
+  };
+
+  const revokePublicLink = async () => {
+    if (!shareModal) return;
+    try {
+      const endpoint = shareModal.type === "file" ? "files" : "folders";
+      const res = await fetch(`/api/${endpoint}/${shareModal.id}/public`, { method: "DELETE" });
+      if (res.ok) {
+        setPublicLink(null);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const copyPublicLink = () => {
+    if (publicLink) {
+      navigator.clipboard.writeText(publicLink);
+      setPublicLinkCopied(true);
+      setTimeout(() => setPublicLinkCopied(false), 2000);
     }
   };
 
@@ -1350,50 +1405,50 @@ export default function DashboardPage() {
 
       {/* Share Modal */}
       {shareModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.4)" }}>
-          <div className="rounded-xl shadow-2xl w-full max-w-md" style={{ background: "#FFFFFF", border: "1px solid #D9CDBF", padding: "32px" }}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.4)", padding: "24px" }}>
+          <div className="rounded-xl shadow-2xl w-full max-w-md" style={{ background: "#FFFFFF", border: "1px solid #D9CDBF" }}>
             {/* Modal Header */}
-            <div className="flex items-center justify-between mb-7">
-              <div className="flex items-center gap-2">
+            <div className="flex items-center justify-between" style={{ padding: "20px 24px 16px 24px" }}>
+              <div className="flex items-center gap-3">
                 <Share2 className="h-5 w-5" style={{ color: "#9B8F5E" }} />
                 <h2 className="text-base font-semibold" style={{ color: "#3E2723" }}>
-                  Share "{shareModal.name}"
+                  Share &quot;{shareModal.name}&quot;
                 </h2>
               </div>
-              <button onClick={() => { setShareModal(null); setShareUserResults([]); }} className="hover:opacity-70">
+              <button onClick={() => { setShareModal(null); setShareUserResults([]); setPublicLink(null); }} className="hover:opacity-70 p-1">
                 <X className="h-5 w-5" style={{ color: "#8B7355" }} />
               </button>
             </div>
 
             {/* Add share form */}
-            <div className="mb-7">
-              <label className="text-xs font-medium mb-2 block" style={{ color: "#8B7355" }}>
-                Add people by email
+            <div style={{ padding: "0 24px 20px 24px" }}>
+              <label className="text-xs font-medium block" style={{ color: "#8B7355", marginBottom: "12px" }}>
+                Share with specific people
               </label>
-              <div className="relative mb-2">
-                <div className="flex gap-3">
+              <div className="relative" style={{ marginBottom: "12px" }}>
+                <div className="flex" style={{ gap: "12px" }}>
                   <input
                     type="email"
                     value={shareEmail}
                     onChange={(e) => { setShareEmail(e.target.value); setShareError(""); }}
                     placeholder="user@example.com"
-                    className="flex-1 text-sm rounded-md focus:outline-none"
-                    style={{ background: "#F5EEE5", color: "#3E2723", border: "1px solid #D9CDBF", padding: "12px 14px" }}
+                    className="flex-1 text-sm rounded-lg focus:outline-none"
+                    style={{ background: "#F5EEE5", color: "#3E2723", border: "1px solid #D9CDBF", padding: "12px 16px" }}
                     onKeyDown={(e) => { if (e.key === "Enter") handleAddShare(); }}
                   />
                   <button
                     onClick={handleAddShare}
                     disabled={isAddingShare || !shareEmail.trim()}
-                    className="text-sm rounded-md hover:opacity-90 disabled:opacity-50 flex items-center gap-1"
-                    style={{ background: "#9B8F5E", color: "#FFFFFF", padding: "12px 16px", whiteSpace: "nowrap" }}
+                    className="text-sm rounded-lg hover:opacity-90 disabled:opacity-50 flex items-center gap-1"
+                    style={{ background: "#9B8F5E", color: "#FFFFFF", padding: "12px 20px", whiteSpace: "nowrap" }}
                   >
                     {isAddingShare ? <Loader2 className="h-4 w-4 animate-spin" /> : "Invite"}
                   </button>
                 </div>
                 {shareEmail.trim().length >= 2 && (isSearchingUsers || shareUserResults.length > 0) && (
                   <div
-                    className="absolute z-10 mt-2 w-full rounded-md shadow-lg"
-                    style={{ background: "#FFFFFF", border: "1px solid #D9CDBF", padding: "8px" }}
+                    className="absolute z-10 w-full rounded-lg shadow-lg"
+                    style={{ background: "#FFFFFF", border: "1px solid #D9CDBF", padding: "8px", marginTop: "8px" }}
                   >
                     {isSearchingUsers ? (
                       <div className="flex items-center justify-center py-2">
@@ -1423,11 +1478,11 @@ export default function DashboardPage() {
                                 <button
                                   type="button"
                                   onClick={() => { setShareEmail(u.email); setShareUserResults([]); }}
-                                  className="w-full text-left flex items-center gap-2 rounded-md hover:opacity-90"
+                                  className="w-full text-left flex items-center gap-3 rounded-lg hover:opacity-90"
                                   style={{ padding: "10px 12px", background: "#F5EEE5" }}
                                 >
                                   <div
-                                    className="w-6 h-6 rounded-full flex items-center justify-center text-xs text-white font-medium"
+                                    className="w-7 h-7 rounded-full flex items-center justify-center text-xs text-white font-medium"
                                     style={{ background: "#9B8F5E" }}
                                   >
                                     {u.name.charAt(0).toUpperCase()}
@@ -1456,46 +1511,50 @@ export default function DashboardPage() {
                 Allow editing
               </label>
               {shareError && (
-                <p className="text-xs mt-2" style={{ color: "#C4756C" }}>{shareError}</p>
+                <p className="text-xs" style={{ color: "#C4756C", marginTop: "12px" }}>{shareError}</p>
               )}
             </div>
 
             {/* Current shares list */}
-            <div>
-              <p className="text-xs font-medium mb-3" style={{ color: "#8B7355" }}>
+            <div style={{ padding: "20px 24px", borderTop: "1px solid #EBE3D5" }}>
+              <p className="text-xs font-medium" style={{ color: "#8B7355", marginBottom: "12px" }}>
                 Shared with
               </p>
               {isLoadingShares ? (
-                <div className="flex items-center justify-center py-4">
+                <div className="flex items-center justify-center" style={{ padding: "16px 0" }}>
                   <Loader2 className="h-4 w-4 animate-spin" style={{ color: "#8B7355" }} />
                 </div>
               ) : shareModalShares.length === 0 ? (
-                <p className="text-xs text-center py-4" style={{ color: "#A89B7B" }}>
+                <p className="text-xs text-center" style={{ color: "#A89B7B", padding: "16px 0" }}>
                   Not shared with anyone yet
                 </p>
               ) : (
-                <ul className="space-y-3">
-                  {shareModalShares.map((s) => (
-                    <li key={s.id} className="flex items-center justify-between rounded-md" style={{ padding: "12px 16px", background: "#F5EEE5" }}>
-                      <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs text-white font-medium" style={{ background: "#9B8F5E" }}>
+                <ul style={{ maxHeight: "160px", overflowY: "auto" }}>
+                  {shareModalShares.map((s, idx) => (
+                    <li 
+                      key={s.id} 
+                      className="flex items-center justify-between rounded-lg" 
+                      style={{ padding: "12px 16px", background: "#F5EEE5", marginTop: idx > 0 ? "8px" : "0" }}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs text-white font-medium" style={{ background: "#9B8F5E" }}>
                           {s.sharedWith.name.charAt(0).toUpperCase()}
                         </div>
                         <div>
-                          <p className="text-xs font-medium" style={{ color: "#3E2723" }}>{s.sharedWith.name}</p>
+                          <p className="text-sm font-medium" style={{ color: "#3E2723" }}>{s.sharedWith.name}</p>
                           <p className="text-xs" style={{ color: "#8B7355" }}>{s.sharedWith.email}</p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs px-2 py-1 rounded" style={{ background: "#EBE3D5", color: "#8B7355" }}>
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs rounded" style={{ background: "#EBE3D5", color: "#8B7355", padding: "4px 8px" }}>
                           {s.canWrite ? "can edit" : "view only"}
                         </span>
                         <button
                           onClick={() => handleRemoveShare(s.id)}
-                          className="hover:opacity-70"
+                          className="hover:opacity-70 p-1"
                           title="Remove access"
                         >
-                          <X className="h-3.5 w-3.5" style={{ color: "#C4756C" }} />
+                          <X className="h-4 w-4" style={{ color: "#C4756C" }} />
                         </button>
                       </div>
                     </li>
@@ -1503,6 +1562,65 @@ export default function DashboardPage() {
                 </ul>
               )}
             </div>
+
+            {/* Public Link Section - at the bottom */}
+            <div style={{ padding: "20px 24px", borderTop: "1px solid #EBE3D5", background: "#FAFAF7", borderRadius: "0 0 12px 12px" }}>
+              <div className="flex items-center gap-2" style={{ marginBottom: "12px" }}>
+                <Globe className="h-4 w-4" style={{ color: "#9B8F5E" }} />
+                <p className="text-xs font-medium" style={{ color: "#3E2723" }}>
+                  Share publicly
+                </p>
+              </div>
+                {publicLink ? (
+                  <div>
+                    <div className="flex items-center" style={{ gap: "10px", marginBottom: "12px" }}>
+                      <input
+                        type="text"
+                        value={publicLink}
+                        readOnly
+                        className="flex-1 text-xs rounded-lg focus:outline-none truncate"
+                        style={{ background: "#FFFFFF", color: "#3E2723", border: "1px solid #D9CDBF", padding: "12px 14px" }}
+                      />
+                      <button
+                        onClick={copyPublicLink}
+                        className="flex items-center gap-2 text-xs rounded-lg hover:opacity-90"
+                        style={{ background: publicLinkCopied ? "#7A8B5E" : "#9B8F5E", color: "#FFFFFF", padding: "12px 16px", whiteSpace: "nowrap" }}
+                      >
+                        {publicLinkCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                        {publicLinkCopied ? "Copied!" : "Copy"}
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs" style={{ color: "#8B7355" }}>
+                        Anyone with this link can view
+                      </p>
+                      <button
+                        onClick={revokePublicLink}
+                        className="text-xs hover:underline"
+                        style={{ color: "#C4756C" }}
+                      >
+                        Revoke link
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={generatePublicLink}
+                    disabled={isGeneratingPublicLink}
+                    className="w-full flex items-center justify-center gap-2 text-sm rounded-lg hover:opacity-90 disabled:opacity-50"
+                    style={{ background: "#9B8F5E", color: "#FFFFFF", padding: "14px 20px" }}
+                  >
+                    {isGeneratingPublicLink ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <>
+                        <Globe className="h-4 w-4" />
+                        Generate public link
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
           </div>
         </div>
       )}

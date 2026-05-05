@@ -34,6 +34,7 @@ model Folder {
   children       Folder[]      @relation("FolderToFolder")
   files          File[]
   shares         FolderShare[]
+  publicToken    String?       @unique @map("public_token")
   isActive       Boolean       @default(true) @map("is_active")
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
@@ -42,18 +43,19 @@ model Folder {
 }
 
 model File {
-  id         String      @id @default(uuid())
-  name       String
-  content    String      @default("") @db.Text
-  layoutData String      @default("{}") @map("layout_data") @db.Text
-  userId     String      @map("user_id")
-  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  folderId   String?     @map("folder_id")
-  folder     Folder?     @relation(fields: [folderId], references: [id], onDelete: Cascade)
-  shares     FileShare[]
-  isActive   Boolean     @default(true) @map("is_active")
-  createdAt  DateTime    @default(now()) @map("created_at")
-  updatedAt  DateTime    @updatedAt @map("updated_at")
+  id          String      @id @default(uuid())
+  name        String
+  content     String      @default("") @db.Text
+  layoutData  String      @default("{}") @map("layout_data") @db.Text
+  userId      String      @map("user_id")
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  folderId    String?     @map("folder_id")
+  folder      Folder?     @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  shares      FileShare[]
+  publicToken String?     @unique @map("public_token")
+  isActive    Boolean     @default(true) @map("is_active")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
 
   @@map("files")
 }
