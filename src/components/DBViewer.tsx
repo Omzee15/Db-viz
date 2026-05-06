@@ -26,6 +26,40 @@ import {
   Search,
 } from "lucide-react";
 
+// PostgreSQL reserved keywords that @dbml/core's ANTLR parser cannot accept as
+// bare (unquoted) column identifiers inside CREATE TABLE statements.
+const _SQL_RESERVED = new Set([
+  'all','analyse','analyze','and','any','array','as','asc','asymmetric',
+  'both','case','cast','check','collate','column','constraint','create',
+  'cross','current_catalog','current_date','current_role','current_schema',
+  'current_time','current_timestamp','current_user','default','deferrable',
+  'desc','distinct','do','else','end','except','false','fetch','for',
+  'foreign','from','grant','group','having','in','initially','inner',
+  'intersect','into','is','join','lateral','leading','left','like',
+  'limit','localtime','localtimestamp','natural','not','null','offset',
+  'on','only','or','order','outer','overlaps','primary','references',
+  'returning','right','select','session_user','similar','some','symmetric',
+  'table','tablesample','then','to','trailing','true','union','unique',
+  'user','using','variadic','verbose','when','where','window','with',
+]);
+const _CONSTRAINT_STARTS = new Set([
+  'primary','constraint','unique','check','foreign','exclude',
+]);
+
+/** Wrap bare reserved-keyword column names in double quotes so the DBML
+ *  importer can parse them without a syntax error. */
+function quoteReservedColumnNames(sql: string): string {
+  return sql.replace(
+    /^([ \t]+)([a-zA-Z_][a-zA-Z0-9_]*)([  \t])/gm,
+    (match, indent, name, space) => {
+      const lower = name.toLowerCase();
+      if (_CONSTRAINT_STARTS.has(lower)) return match;
+      if (_SQL_RESERVED.has(lower)) return `${indent}"${name}"${space}`;
+      return match;
+    }
+  );
+}
+
 interface Column {
   name: string;
   type: string;
@@ -363,7 +397,8 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTa
       .filter((stmt) => /^CREATE\s+TABLE\b/i.test(stmt));
 
     if (createTableStatements.length === 0) return "";
-    return createTableStatements.join(";\n\n") + ";";
+    const joined = createTableStatements.join(";\n\n") + ";";
+    return quoteReservedColumnNames(joined);
   };
 
   const parseDBML = useCallback(
