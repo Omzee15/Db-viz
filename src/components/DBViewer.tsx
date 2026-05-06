@@ -392,12 +392,16 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTa
     const withoutBlockComments = content.replace(/\/\*[\s\S]*?\*\//g, "");
     const withoutLineComments = withoutBlockComments.replace(/--.*$/gm, "");
     const statements = withoutLineComments.split(";");
-    const createTableStatements = statements
+    const relevantStatements = statements
       .map((stmt) => stmt.trim())
-      .filter((stmt) => /^CREATE\s+TABLE\b/i.test(stmt));
+      .filter(
+        (stmt) =>
+          /^CREATE\s+TABLE\b/i.test(stmt) ||
+          /^ALTER\s+TABLE\b[\s\S]*?FOREIGN\s+KEY/i.test(stmt)
+      );
 
-    if (createTableStatements.length === 0) return "";
-    const joined = createTableStatements.join(";\n\n") + ";";
+    if (relevantStatements.length === 0) return "";
+    const joined = relevantStatements.join(";\n\n") + ";";
     return quoteReservedColumnNames(joined);
   };
 
