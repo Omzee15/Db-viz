@@ -28,6 +28,8 @@ import {
   Globe,
   Copy,
   Check,
+  Link,
+  Unplug,
 } from "lucide-react";
 import DBViewer from "@/components/DBViewer";
 import { useGuest } from "@/lib/guest-context";
@@ -131,7 +133,31 @@ export default function DashboardPage() {
   const [isGeneratingPublicLink, setIsGeneratingPublicLink] = useState(false);
   const [publicLinkCopied, setPublicLinkCopied] = useState(false);
 
+  // Live DB connection state
+  const [showConnectModal, setShowConnectModal] = useState(false);
+  const [connectMode, setConnectMode] = useState<"url" | "fields">("url");
+  const [connectString, setConnectString] = useState("");
+  const [connectHost, setConnectHost] = useState("localhost");
+  const [connectPort, setConnectPort] = useState("5432");
+  const [connectUser, setConnectUser] = useState("");
+  const [connectPassword, setConnectPassword] = useState("");
+  const [connectDb, setConnectDb] = useState("");
+  const [connectSsl, setConnectSsl] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [connectError, setConnectError] = useState("");
+  const [liveConnections, setLiveConnections] = useState<{ id: string; dbml: string; label: string; tableCount: number; fkCount: number; fkRawCount: number; fkError?: string }[]>([]);
+  const [activeLiveId, setActiveLiveId] = useState<string | null>(null);
+
   const isSidebarCompact = sidebarWidth <= 170;
+
+  // Always clear sensitive credentials when the connect modal opens
+  useEffect(() => {
+    if (showConnectModal) {
+      setConnectPassword("");
+      setConnectString("");
+      setConnectError("");
+    }
+  }, [showConnectModal]);
 
   useEffect(() => {
     if (!isSidebarCompact) {
@@ -369,6 +395,7 @@ export default function DashboardPage() {
   };
 
   const handleSelectFile = async (file: FileItem) => {
+    setActiveLiveId(null);
     if (isGuest) {
       const guestFile = getGuestFile(file.id);
       if (guestFile) setSelectedFile(guestFile as FileItem);
@@ -425,6 +452,69 @@ export default function DashboardPage() {
   const handleLayoutChange = (layoutData: string) => {
     setFileLayoutData(layoutData);
     setHasChanges(true);
+  };
+
+  const handleConnectDb = async () => {
+    setIsConnecting(true);
+    setConnectError("");
+    let connectionString = "";
+    let label = "Live DB";
+    try {
+      if (connectMode === "url") {
+        if (!connectString.trim()) { setIsConnecting(false); return; }
+        connectionString = connectString.trim();
+        try {
+          const url = new URL(connectionString);
+          const dbName = url.pathname.replace(/^\//, "");
+          const host = url.hostname;
+          if (dbName) label = `${dbName}@${host}`;
+          else if (host) label = host;
+        } catch { /* ignore */ }
+      } else {
+        if (!connectHost.trim() || !connectDb.trim()) {
+          setConnectError("Host and database name are required");
+          setIsConnecting(false);
+          return;
+        }
+        const user = encodeURIComponent(connectUser.trim());
+        const pass = encodeURIComponent(connectPassword);
+        const host = connectHost.trim();
+        const port = connectPort.trim() || "5432";
+        const db = connectDb.trim();
+        const sslParam = connectSsl ? "?sslmode=require" : "";
+        connectionString = user
+          ? `postgresql://${user}${pass ? `:${pass}` : ""}@${host}:${port}/${db}${sslParam}`
+          : `postgresql://${host}:${port}/${db}${sslParam}`;
+        label = `${db}@${host}`;
+      }
+
+      const res = await fetch("/api/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connectionString }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setConnectError(data.error || "Connection failed");
+        return;
+      }
+      const id = crypto.randomUUID();
+      setLiveConnections((prev) => [...prev, { id, dbml: data.dbml, label, tableCount: data.tableCount ?? 0, fkCount: data.fkCount ?? 0, fkRawCount: data.fkRawCount ?? 0, fkError: data.fkError ?? undefined }]);
+      setActiveLiveId(id);
+      setSelectedFile(null);
+      setShowConnectModal(false);
+      setConnectString("");
+      setConnectPassword("");
+    } catch (err) {
+      setConnectError(err instanceof Error ? err.message : "Connection failed");
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  const handleDisconnect = (id: string) => {
+    setLiveConnections((prev) => prev.filter((c) => c.id !== id));
+    setActiveLiveId((prev) => (prev === id ? null : prev));
   };
 
   const handleCreateFile = async (name: string) => {
@@ -1171,6 +1261,14 @@ export default function DashboardPage() {
                   {isGuest ? "Local Files" : "Files"}
                 </span>
                 <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => { setShowConnectModal(true); setConnectError(""); }}
+                    className="rounded-md hover:opacity-80"
+                    style={{ background: "#EBE3D5", padding: "6px" }}
+                    title="Connect to database"
+                  >
+                    <Link className="h-4 w-4" style={{ color: "#8B7355" }} />
+                  </button>
                   {!isGuest && (
                     <button
                       onClick={() => startCreatingFolder(null)}
@@ -1304,7 +1402,39 @@ export default function DashboardPage() {
                     {isCreatingFile && creatingInFolderId === null && renderInlineInput("file", 0)}
                     {filteredRootFiles.map((file) => renderFile(file))}
 
-                    {isEmpty && (
+                    {/* Live DB connections */}
+                    {liveConnections.length > 0 && (
+                      <div style={{ marginTop: filteredFolders.length > 0 || filteredRootFiles.length > 0 ? "12px" : "0" }}>
+                        <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: "#8B7355", padding: "4px 4px 8px 4px", opacity: 0.7 }}>Live Connections</div>
+                        {liveConnections.map((conn) => (
+                          <div
+                            key={conn.id}
+                            className="flex items-center gap-2 rounded-md cursor-pointer group"
+                            style={{
+                              padding: "10px 12px",
+                              background: activeLiveId === conn.id ? "#EBE3D5" : "transparent",
+                              marginBottom: "4px",
+                            }}
+                            onClick={() => { setActiveLiveId(conn.id); setSelectedFile(null); }}
+                            onMouseEnter={(e) => activeLiveId !== conn.id && (e.currentTarget.style.background = "#EBE3D5")}
+                            onMouseLeave={(e) => activeLiveId !== conn.id && (e.currentTarget.style.background = "transparent")}
+                          >
+                            <Database className="h-4 w-4 flex-shrink-0" style={{ color: "#9B8F5E" }} />
+                            <span className="text-sm truncate flex-1" style={{ color: "#3E2723" }}>{conn.label}</span>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleDisconnect(conn.id); }}
+                              className="opacity-0 group-hover:opacity-100 rounded hover:opacity-80"
+                              style={{ padding: "4px" }}
+                              title="Disconnect"
+                            >
+                              <Unplug className="h-3 w-3" style={{ color: "#C4756C" }} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {isEmpty && liveConnections.length === 0 && (
                       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", padding: "32px 0", color: "#8B7355" }}>
                         <FileText style={{ width: "48px", height: "48px", marginBottom: "10px", opacity: 0.5 }} />
                         <p style={{ fontSize: "14px", fontWeight: 500, marginBottom: "4px" }}>
@@ -1324,15 +1454,58 @@ export default function DashboardPage() {
 
         {/* Main Content */}
         <main className="flex-1 overflow-hidden">
-          {selectedFile ? (
-            <DBViewer
-              dbmlContent={dbmlContent}
-              fileName={selectedFile.name}
-              layoutData={fileLayoutData}
-              onLayoutChange={handleLayoutChange}
-              onTableSelect={handleTableSelect}
-            />
-          ) : (
+          {(() => {
+            const activeLiveConn = activeLiveId ? liveConnections.find((c) => c.id === activeLiveId) : null;
+            if (selectedFile) {
+              return (
+                <DBViewer
+                  dbmlContent={dbmlContent}
+                  fileName={selectedFile.name}
+                  layoutData={fileLayoutData}
+                  onLayoutChange={handleLayoutChange}
+                  onTableSelect={handleTableSelect}
+                />
+              );
+            }
+            if (activeLiveConn) {
+              return (
+                <div className="h-full flex flex-col">
+                  <div className="flex items-center justify-between" style={{ height: "48px", background: "#FFFFFF", borderBottom: "1px solid #D9CDBF", padding: "0 16px" }}>
+                    <div className="flex items-center gap-2">
+                      <Database className="h-4 w-4" style={{ color: "#9B8F5E" }} />
+                      <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: "#8B7355" }}>Live: {activeLiveConn.label}</span>
+                      <span className="text-xs" style={{ color: "#8B7355", opacity: 0.7 }}>
+                        {activeLiveConn.tableCount} tables · {activeLiveConn.fkCount} relations (raw: {activeLiveConn.fkRawCount})
+                      </span>
+                      {activeLiveConn.fkError && (
+                        <span className="text-xs rounded" style={{ color: "#C4756C", background: "#FDF0EE", padding: "2px 8px" }} title={activeLiveConn.fkError}>
+                          FK query failed
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => handleDisconnect(activeLiveConn.id)}
+                      className="flex items-center gap-2 text-xs rounded-md hover:opacity-80"
+                      style={{ background: "#EBE3D5", color: "#8B7355", padding: "6px 12px" }}
+                      title="Disconnect"
+                    >
+                      <Unplug className="h-3 w-3" />
+                      Disconnect
+                    </button>
+                  </div>
+                  <div className="flex-1 overflow-hidden">
+                    <DBViewer
+                      dbmlContent={activeLiveConn.dbml}
+                      fileName={activeLiveConn.label + ".dbml"}
+                      layoutData=""
+                      onLayoutChange={() => {}}
+                      onTableSelect={() => {}}
+                    />
+                  </div>
+                </div>
+              );
+            }
+            return (
             <div className="h-full flex flex-col">
               <div className="flex items-center justify-between" style={{ height: "48px", background: "#FFFFFF", borderBottom: "1px solid #D9CDBF", padding: "0 16px" }}>
                 <div className="flex items-center gap-2">
@@ -1344,11 +1517,20 @@ export default function DashboardPage() {
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>
                   <Database style={{ width: "64px", height: "64px", marginBottom: "12px", opacity: 0.3, color: "#8B7355" }} />
                   <h2 style={{ fontSize: "20px", fontWeight: 500, marginBottom: "8px", color: "#3E2723" }}>Select a file</h2>
-                  <p style={{ fontSize: "14px", color: "#8B7355" }}>Choose a DBML file from the sidebar to view its diagram</p>
+                  <p style={{ fontSize: "14px", color: "#8B7355", marginBottom: "16px" }}>Choose a DBML file from the sidebar to view its diagram</p>
+                  <button
+                    onClick={() => { setShowConnectModal(true); setConnectError(""); }}
+                    className="flex items-center gap-2 text-sm rounded-lg hover:opacity-90"
+                    style={{ background: "#9B8F5E", color: "#FFFFFF", padding: "12px 20px" }}
+                  >
+                    <Link className="h-4 w-4" />
+                    Connect to a database
+                  </button>
                 </div>
               </div>
             </div>
-          )}
+            );
+          })()}
         </main>
       </div>
 
@@ -1400,6 +1582,168 @@ export default function DashboardPage() {
             <Trash2 className="h-4 w-4" />
             Delete
           </button>
+        </div>
+      )}
+
+      {/* Connect to DB Modal */}
+      {showConnectModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.4)", padding: "24px" }}>
+          <div className="rounded-xl shadow-2xl w-full max-w-lg" style={{ background: "#FFFFFF", border: "1px solid #D9CDBF" }}>
+            <div className="flex items-center justify-between" style={{ padding: "20px 24px 16px 24px" }}>
+              <div className="flex items-center gap-3">
+                <Link className="h-5 w-5" style={{ color: "#9B8F5E" }} />
+                <h2 className="text-base font-semibold" style={{ color: "#3E2723" }}>Connect to a database</h2>
+              </div>
+              <button onClick={() => { setShowConnectModal(false); setConnectPassword(""); setConnectString(""); }} className="hover:opacity-70 p-1">
+                <X className="h-5 w-5" style={{ color: "#8B7355" }} />
+              </button>
+            </div>
+
+            {/* Tab switcher */}
+            <div className="flex" style={{ padding: "0 24px", gap: "4px", marginBottom: "20px" }}>
+              {(["url", "fields"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => { setConnectMode(mode); setConnectError(""); }}
+                  className="flex-1 text-xs rounded-lg"
+                  style={{
+                    padding: "8px 0",
+                    background: connectMode === mode ? "#9B8F5E" : "#EBE3D5",
+                    color: connectMode === mode ? "#FFFFFF" : "#8B7355",
+                    fontWeight: connectMode === mode ? 600 : 400,
+                    border: "none",
+                    cursor: "pointer",
+                  }}
+                >
+                  {mode === "url" ? "Connection URL" : "Credentials"}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ padding: "0 24px 24px 24px" }}>
+              {connectMode === "url" ? (
+                <>
+                  <label className="text-xs font-medium block" style={{ color: "#8B7355", marginBottom: "8px" }}>
+                    PostgreSQL connection string
+                  </label>
+                  <input
+                    type="password"
+                    value={connectString}
+                    onChange={(e) => { setConnectString(e.target.value); setConnectError(""); }}
+                    placeholder="postgresql://user:password@host:5432/dbname"
+                    className="w-full text-sm rounded-lg focus:outline-none"
+                    style={{ background: "#F5EEE5", color: "#3E2723", border: "1px solid #D9CDBF", padding: "12px 16px", marginBottom: "16px", fontFamily: "monospace" }}
+                    onKeyDown={(e) => { if (e.key === "Enter" && !isConnecting) handleConnectDb(); }}
+                    autoFocus
+                  />
+                </>
+              ) : (
+                <>
+                  <div className="flex gap-3" style={{ marginBottom: "12px" }}>
+                    <div style={{ flex: 3 }}>
+                      <label className="text-xs font-medium block" style={{ color: "#8B7355", marginBottom: "6px" }}>Host</label>
+                      <input
+                        type="text"
+                        value={connectHost}
+                        onChange={(e) => { setConnectHost(e.target.value); setConnectError(""); }}
+                        placeholder="localhost"
+                        className="w-full text-sm rounded-lg focus:outline-none"
+                        style={{ background: "#F5EEE5", color: "#3E2723", border: "1px solid #D9CDBF", padding: "10px 14px" }}
+                        autoFocus
+                      />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label className="text-xs font-medium block" style={{ color: "#8B7355", marginBottom: "6px" }}>Port</label>
+                      <input
+                        type="text"
+                        value={connectPort}
+                        onChange={(e) => { setConnectPort(e.target.value); setConnectError(""); }}
+                        placeholder="5432"
+                        className="w-full text-sm rounded-lg focus:outline-none"
+                        style={{ background: "#F5EEE5", color: "#3E2723", border: "1px solid #D9CDBF", padding: "10px 14px" }}
+                      />
+                    </div>
+                  </div>
+                  <div style={{ marginBottom: "12px" }}>
+                    <label className="text-xs font-medium block" style={{ color: "#8B7355", marginBottom: "6px" }}>Database name</label>
+                    <input
+                      type="text"
+                      value={connectDb}
+                      onChange={(e) => { setConnectDb(e.target.value); setConnectError(""); }}
+                      placeholder="mydb"
+                      className="w-full text-sm rounded-lg focus:outline-none"
+                      style={{ background: "#F5EEE5", color: "#3E2723", border: "1px solid #D9CDBF", padding: "10px 14px" }}
+                    />
+                  </div>
+                  <div className="flex gap-3" style={{ marginBottom: "12px" }}>
+                    <div style={{ flex: 1 }}>
+                      <label className="text-xs font-medium block" style={{ color: "#8B7355", marginBottom: "6px" }}>Username</label>
+                      <input
+                        type="text"
+                        value={connectUser}
+                        onChange={(e) => { setConnectUser(e.target.value); setConnectError(""); }}
+                        placeholder="postgres"
+                        className="w-full text-sm rounded-lg focus:outline-none"
+                        style={{ background: "#F5EEE5", color: "#3E2723", border: "1px solid #D9CDBF", padding: "10px 14px" }}
+                        autoComplete="username"
+                      />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label className="text-xs font-medium block" style={{ color: "#8B7355", marginBottom: "6px" }}>Password</label>
+                      <input
+                        type="password"
+                        value={connectPassword}
+                        onChange={(e) => { setConnectPassword(e.target.value); setConnectError(""); }}
+                        placeholder="••••••••"
+                        className="w-full text-sm rounded-lg focus:outline-none"
+                        style={{ background: "#F5EEE5", color: "#3E2723", border: "1px solid #D9CDBF", padding: "10px 14px" }}
+                        autoComplete="current-password"
+                        onKeyDown={(e) => { if (e.key === "Enter" && !isConnecting) handleConnectDb(); }}
+                      />
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs cursor-pointer" style={{ color: "#8B7355", marginBottom: "16px" }}>
+                    <input
+                      type="checkbox"
+                      checked={connectSsl}
+                      onChange={(e) => setConnectSsl(e.target.checked)}
+                      className="rounded"
+                    />
+                    Use SSL (sslmode=require)
+                  </label>
+                </>
+              )}
+              <p className="text-xs" style={{ color: "#8B7355", marginBottom: "16px" }}>
+                Introspects the <strong>public</strong> schema. Credentials are not stored — used once to fetch the schema.
+              </p>
+              {connectError && (
+                <p className="text-xs rounded-lg" style={{ color: "#C4756C", background: "#FDF0EE", border: "1px solid #F5C6BE", padding: "10px 14px", marginBottom: "16px" }}>
+                  {connectError}
+                </p>
+              )}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => { setShowConnectModal(false); setConnectPassword(""); setConnectString(""); }}
+                  className="flex-1 text-sm rounded-lg hover:opacity-80"
+                  style={{ background: "#EBE3D5", color: "#8B7355", padding: "12px 20px" }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConnectDb}
+                  disabled={isConnecting || (connectMode === "url" ? !connectString.trim() : !connectHost.trim() || !connectDb.trim())}
+                  className="flex-1 flex items-center justify-center gap-2 text-sm rounded-lg hover:opacity-90 disabled:opacity-50"
+                  style={{ background: "#9B8F5E", color: "#FFFFFF", padding: "12px 20px" }}
+                >
+                  {isConnecting ? (
+                    <><Loader2 className="h-4 w-4 animate-spin" /> Connecting...</>
+                  ) : (
+                    <><Link className="h-4 w-4" /> Connect</>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
