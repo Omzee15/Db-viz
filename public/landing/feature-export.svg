@@ -1,0 +1,20 @@
+<svg width="640" height="360" viewBox="0 0 640 360" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Auto-layout and export">
+  <rect width="640" height="360" fill="#F3ECE0"/>
+  <g>
+    <rect x="120" y="90" width="200" height="180" rx="14" fill="#FFFFFF" stroke="#D9CDBF"/>
+    <rect x="120" y="90" width="200" height="36" rx="14" fill="#9B8F5E"/><rect x="120" y="110" width="200" height="16" fill="#9B8F5E"/>
+    <text x="142" y="115" font-family="Geist, sans-serif" font-size="16" font-weight="700" fill="#FFFFFF">diagram.svg</text>
+    <rect x="142" y="150" width="60" height="50" rx="6" fill="#EADFCD"/>
+    <rect x="222" y="150" width="60" height="50" rx="6" fill="#EADFCD"/>
+    <rect x="142" y="212" width="140" height="40" rx="6" fill="#F3ECE0"/>
+  </g>
+  <path d="M340 180 H 430 m0 0 l-18 -16 m18 16 l-18 16" stroke="#9B8F5E" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <g>
+    <rect x="450" y="120" width="70" height="50" rx="8" fill="#FFFFFF" stroke="#9B8F5E" stroke-width="2"/>
+    <text x="485" y="151" text-anchor="middle" font-family="Geist Mono, monospace" font-size="15" fill="#9B8F5E">SQL</text>
+    <rect x="450" y="190" width="70" height="50" rx="8" fill="#FFFFFF" stroke="#9B8F5E" stroke-width="2"/>
+    <text x="485" y="221" text-anchor="middle" font-family="Geist Mono, monospace" font-size="15" fill="#9B8F5E">PNG</text>
+    <rect x="450" y="260" width="70" height="50" rx="8" fill="#9B8F5E"/>
+    <text x="485" y="291" text-anchor="middle" font-family="Geist Mono, monospace" font-size="15" fill="#FFFFFF">DBML</text>
+  </g>
+</svg>

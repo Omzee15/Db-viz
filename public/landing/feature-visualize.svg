@@ -1,0 +1,23 @@
+<svg width="640" height="360" viewBox="0 0 640 360" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Visualize relationships">
+  <rect width="640" height="360" fill="#F3ECE0"/>
+  <path d="M200 120 C 270 120, 270 240, 340 240" stroke="#9B8F5E" stroke-width="3" fill="none"/>
+  <path d="M450 150 C 400 150, 400 240, 340 240" stroke="#9B8F5E" stroke-width="3" fill="none"/>
+  <g>
+    <rect x="80" y="80" width="130" height="90" rx="10" fill="#FFFFFF" stroke="#D9CDBF"/>
+    <rect x="80" y="80" width="130" height="28" rx="10" fill="#9B8F5E"/><rect x="80" y="97" width="130" height="11" fill="#9B8F5E"/>
+    <text x="98" y="100" font-family="Geist, sans-serif" font-size="14" font-weight="700" fill="#FFFFFF">users</text>
+    <rect x="98" y="126" width="64" height="8" rx="4" fill="#D9CDBF"/><rect x="98" y="146" width="84" height="8" rx="4" fill="#EADFCD"/>
+  </g>
+  <g>
+    <rect x="430" y="100" width="130" height="90" rx="10" fill="#FFFFFF" stroke="#D9CDBF"/>
+    <rect x="430" y="100" width="130" height="28" rx="10" fill="#9B8F5E"/><rect x="430" y="117" width="130" height="11" fill="#9B8F5E"/>
+    <text x="448" y="120" font-family="Geist, sans-serif" font-size="14" font-weight="700" fill="#FFFFFF">products</text>
+    <rect x="448" y="146" width="64" height="8" rx="4" fill="#D9CDBF"/><rect x="448" y="166" width="84" height="8" rx="4" fill="#EADFCD"/>
+  </g>
+  <g>
+    <rect x="275" y="240" width="130" height="90" rx="10" fill="#FFFFFF" stroke="#D9CDBF"/>
+    <rect x="275" y="240" width="130" height="28" rx="10" fill="#9B8F5E"/><rect x="275" y="257" width="130" height="11" fill="#9B8F5E"/>
+    <text x="293" y="260" font-family="Geist, sans-serif" font-size="14" font-weight="700" fill="#FFFFFF">orders</text>
+    <rect x="293" y="286" width="64" height="8" rx="4" fill="#D9CDBF"/><rect x="293" y="306" width="84" height="8" rx="4" fill="#EADFCD"/>
+  </g>
+</svg>

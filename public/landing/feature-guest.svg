@@ -1,0 +1,11 @@
+<svg width="640" height="360" viewBox="0 0 640 360" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Try instantly, no account">
+  <rect width="640" height="360" fill="#F3ECE0"/>
+  <circle cx="320" cy="155" r="62" fill="#FFFFFF" stroke="#9B8F5E" stroke-width="4"/>
+  <circle cx="320" cy="135" r="24" fill="#9B8F5E"/>
+  <path d="M282 200 a38 30 0 0 1 76 0" fill="#9B8F5E"/>
+  <g>
+    <rect x="372" y="120" width="56" height="56" rx="14" fill="#9B8F5E"/>
+    <path d="M388 148 l8 8 l16 -18" stroke="#FFFFFF" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="320" y="285" text-anchor="middle" font-family="Geist, sans-serif" font-size="22" font-weight="600" fill="#3E2723">No sign-up required</text>
+</svg>

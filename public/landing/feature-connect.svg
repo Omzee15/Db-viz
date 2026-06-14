@@ -1,0 +1,22 @@
+<svg width="640" height="360" viewBox="0 0 640 360" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Import from PostgreSQL">
+  <rect width="640" height="360" fill="#F3ECE0"/>
+  <g>
+    <ellipse cx="170" cy="130" rx="58" ry="20" fill="#9B8F5E"/>
+    <path d="M112 130 V 240 a58 20 0 0 0 116 0 V 130" fill="#B3A874"/>
+    <ellipse cx="170" cy="130" rx="58" ry="20" fill="#9B8F5E"/>
+    <ellipse cx="170" cy="185" rx="58" ry="20" fill="none" stroke="#F3ECE0" stroke-width="3" opacity="0.6"/>
+  </g>
+  <text x="170" y="300" text-anchor="middle" font-family="Geist Mono, monospace" font-size="16" fill="#8B7355">PostgreSQL</text>
+  <path d="M228 185 H 380" stroke="#9B8F5E" stroke-width="4" stroke-dasharray="9 9"/>
+  <circle cx="304" cy="185" r="18" fill="#FFFFFF" stroke="#9B8F5E" stroke-width="3"/>
+  <path d="M296 185 l5 5 l11 -12" stroke="#9B8F5E" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <g>
+    <rect x="400" y="110" width="160" height="160" rx="12" fill="#FFFFFF" stroke="#D9CDBF"/>
+    <rect x="400" y="110" width="160" height="32" rx="12" fill="#9B8F5E"/><rect x="400" y="126" width="160" height="16" fill="#9B8F5E"/>
+    <text x="422" y="132" font-family="Geist, sans-serif" font-size="15" font-weight="700" fill="#FFFFFF">schema</text>
+    <rect x="422" y="162" width="80" height="9" rx="4.5" fill="#D9CDBF"/>
+    <rect x="422" y="186" width="112" height="9" rx="4.5" fill="#EADFCD"/>
+    <rect x="422" y="210" width="68" height="9" rx="4.5" fill="#D9CDBF"/>
+    <rect x="422" y="234" width="96" height="9" rx="4.5" fill="#EADFCD"/>
+  </g>
+</svg>

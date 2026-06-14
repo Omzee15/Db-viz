@@ -53,8 +53,46 @@
   }
 }
 
-* {
-  box-sizing: border-box;
+/* ── Landing page design tokens (NeuroDB-style, olive accent) ───────────── */
+:root {
+  --lp-bg: #F5EFE7;          /* warm beige/cream */
+  --lp-fg: #3E2723;          /* dark brown text */
+  --lp-card: #FBF7F0;        /* light cream card */
+  --lp-card-2: #F3ECE0;
+  --lp-muted-fg: #8B7355;    /* muted brown */
+  --lp-primary: #9B8F5E;     /* olive/gold accent */
+  --lp-primary-soft: rgba(155, 143, 94, 0.12);
+  --lp-primary-softer: rgba(155, 143, 94, 0.20);
+  --lp-border: #D9CDBF;
+
+  --gradient-hero: linear-gradient(135deg, rgba(155, 143, 94, 0.10) 0%, #F5EFE7 60%);
+  --gradient-card: linear-gradient(180deg, #FBF7F0 0%, #F3ECE0 100%);
+
+  --glow-primary: 0 0 48px rgba(155, 143, 94, 0.30);
+  --glow-subtle: 0 0 22px rgba(155, 143, 94, 0.14);
+  --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.gradient-hero { background: var(--gradient-hero); }
+.gradient-card { background: var(--gradient-card); }
+.glow-primary { box-shadow: var(--glow-primary); }
+.glow-subtle { box-shadow: var(--glow-subtle); }
+.transition-smooth { transition: var(--transition-smooth); }
+
+@keyframes lp-fade-in {
+  0% { opacity: 0; transform: translateY(12px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.lp-fade-in { animation: lp-fade-in 0.6s ease-out both; }
+
+@keyframes lp-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.lp-pulse { animation: lp-pulse 2s ease-in-out infinite; }
+
+html,
+body {
   padding: 0;
   margin: 0;
 }
