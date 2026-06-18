@@ -24,6 +24,9 @@ import {
   Eye,
   EyeOff,
   Search,
+  Layers,
+  ChevronDown,
+  Loader2,
 } from "lucide-react";
 
 // PostgreSQL reserved keywords that @dbml/core's ANTLR parser cannot accept as
@@ -82,6 +85,12 @@ interface DBViewerProps {
   layoutData: string;
   onLayoutChange: (layoutData: string) => void;
   onTableSelect?: (tableName: string) => void;
+  // Live-connection schema controls. When provided, a "Schemas" dropdown is
+  // shown next to the search box so the user can change which schemas are
+  // visualized. Omitted for plain file viewing.
+  schemaOptions?: string[];
+  selectedSchemas?: string[];
+  onSchemasChange?: (next: string[]) => void;
 }
 
 // Custom Table Node Component - Solarized Light theme like Project-Nest
@@ -209,7 +218,7 @@ const nodeTypes = {
 };
 
 // Inner component that uses ReactFlow hooks
-function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTableSelect }: DBViewerProps) {
+function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTableSelect, schemaOptions, selectedSchemas, onSchemasChange }: DBViewerProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<TableNodeType>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [error, setError] = useState<string | null>(null);
@@ -219,6 +228,8 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTa
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [isInteractive, setIsInteractive] = useState(true);
   const [lockWarning, setLockWarning] = useState(false);
+  const [showSchemaDropdown, setShowSchemaDropdown] = useState(false);
+  const schemaRef = useRef<HTMLDivElement>(null);
   const isRestoring = useRef(false);
   const lockWarningTimeout = useRef<NodeJS.Timeout | null>(null);
 
@@ -239,6 +250,17 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTa
     const handleClickOutside = (e: MouseEvent) => {
       if (searchRef.current && !searchRef.current.contains(e.target as HTMLElement)) {
         setShowSearchDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Close schema dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (schemaRef.current && !schemaRef.current.contains(e.target as HTMLElement)) {
+        setShowSchemaDropdown(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -624,6 +646,56 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTa
       {/* Toolbar */}
       <div className="flex items-center justify-end" style={{ background: '#FFFFFF', borderBottom: '1px solid #D9CDBF', padding: '12px 16px' }}>
         <div className="flex items-center gap-2">
+          {/* Schema selector (live connections only) */}
+          {schemaOptions && schemaOptions.length > 0 && onSchemasChange && (
+            <div className="relative" ref={schemaRef}>
+              <button
+                onClick={() => setShowSchemaDropdown((v) => !v)}
+                className="flex items-center gap-2 rounded-md hover:opacity-90"
+                style={{ background: '#F5EEE5', border: '1px solid #D9CDBF', padding: '6px 12px', color: '#3E2723' }}
+                title="Choose which schemas to visualize"
+              >
+                <Layers className="h-4 w-4" style={{ color: '#8B7355' }} />
+                <span className="text-sm">Schemas ({(selectedSchemas ?? []).length})</span>
+                <ChevronDown className="h-3.5 w-3.5" style={{ color: '#8B7355' }} />
+              </button>
+              {showSchemaDropdown && (
+                <div
+                  className="absolute top-full left-0 mt-1 rounded-md shadow-lg z-50 max-h-64 overflow-y-auto"
+                  style={{ background: '#FFFFFF', border: '1px solid #D9CDBF', minWidth: '220px', padding: '6px' }}
+                >
+                  {schemaOptions.map((schema) => {
+                    const checked = (selectedSchemas ?? []).includes(schema);
+                    return (
+                      <label
+                        key={schema}
+                        className="flex items-center gap-2 text-sm cursor-pointer rounded"
+                        style={{ padding: '7px 8px', color: '#3E2723' }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = '#EBE3D5')}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            const current = selectedSchemas ?? [];
+                            const next = e.target.checked
+                              ? [...current, schema]
+                              : current.filter((s) => s !== schema);
+                            // Don't allow deselecting the last schema.
+                            if (next.length === 0) return;
+                            onSchemasChange(next);
+                          }}
+                        />
+                        <Database className="h-3.5 w-3.5 flex-shrink-0" style={{ color: '#9B8F5E' }} />
+                        <span className="truncate">{schema}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
           {/* Search Box */}
           <div className="relative" ref={searchRef}>
             <div className="flex items-center gap-2 rounded-md" style={{ background: '#F5EEE5', border: '1px solid #D9CDBF', padding: '6px 12px' }}>
@@ -691,6 +763,17 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTa
 
       {/* ReactFlow Canvas */}
       <div className="flex-1 relative" style={{ background: '#F5EFE7' }}>
+        {isLoading && (
+          <div
+            className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-3"
+            style={{ background: 'rgba(245,239,231,0.75)', backdropFilter: 'blur(2px)' }}
+          >
+            <Loader2 className="h-7 w-7 animate-spin" style={{ color: '#9B8F5E' }} />
+            <span className="text-sm font-medium" style={{ color: '#8B7355' }}>
+              Building diagram…
+            </span>
+          </div>
+        )}
         {error && (
           <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-50">
             <div className="rounded-lg text-sm shadow-sm" style={{ background: 'rgba(196, 117, 108, 0.15)', border: '1px solid #C4756C', color: '#C4756C', padding: '12px 20px' }}>

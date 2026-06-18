@@ -75,6 +75,34 @@ interface ShareEntry {
 
 type FileFilter = "all" | "my" | "shared";
 
+interface LiveConnection {
+  id: string;
+  dbml: string;
+  label: string;
+  tableCount: number;
+  fkCount: number;
+  fkRawCount: number;
+  fkError?: string;
+  // The (in-memory only) connection string, kept so the schema selection can
+  // be changed without reconnecting from scratch. Never persisted.
+  connString: string;
+  allSchemas: string[];
+  selectedSchemas: string[];
+  // Set when this live connection was opened from / saved to a stored record.
+  savedId?: string;
+}
+
+interface SavedConnection {
+  id: string;
+  label: string;
+  host: string;
+  port: number;
+  database: string;
+  username: string;
+  ssl: boolean;
+  schemas: string[];
+}
+
 export default function DashboardPage() {
   const [folders, setFolders] = useState<FolderItem[]>([]);
   const [rootFiles, setRootFiles] = useState<FileItem[]>([]);
@@ -145,8 +173,27 @@ export default function DashboardPage() {
   const [connectSsl, setConnectSsl] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectError, setConnectError] = useState("");
-  const [liveConnections, setLiveConnections] = useState<{ id: string; dbml: string; label: string; tableCount: number; fkCount: number; fkRawCount: number; fkError?: string }[]>([]);
+  const [liveConnections, setLiveConnections] = useState<LiveConnection[]>([]);
   const [activeLiveId, setActiveLiveId] = useState<string | null>(null);
+  // Set while a live connection's schema is being (re)introspected, so the
+  // viewer can show a loader until the new DBML arrives.
+  const [reloadingLiveId, setReloadingLiveId] = useState<string | null>(null);
+
+  // Two-step connect flow: "connect" picks credentials, "schemas" lets the
+  // user choose which schemas to visualize.
+  const [connectStep, setConnectStep] = useState<"connect" | "schemas">("connect");
+  const [availableSchemas, setAvailableSchemas] = useState<string[]>([]);
+  const [selectedSchemas, setSelectedSchemas] = useState<string[]>([]);
+  const [connectLabel, setConnectLabel] = useState("");
+  // The connection string built in step 1, reused in step 2 (kept only in
+  // memory for the duration of the modal — never persisted).
+  const [pendingConnString, setPendingConnString] = useState("");
+  // Field-derived details, carried so a connection can be saved without password.
+  const [pendingDetails, setPendingDetails] = useState<{ host: string; port: number; database: string; username: string; ssl: boolean } | null>(null);
+
+  // Saved connections (logged-in users only; password is never stored).
+  const [savedConnections, setSavedConnections] = useState<SavedConnection[]>([]);
+  const [prefillConnectionId, setPrefillConnectionId] = useState<string | null>(null);
 
   const isSidebarCompact = sidebarWidth <= 170;
 
@@ -156,6 +203,16 @@ export default function DashboardPage() {
       setConnectPassword("");
       setConnectString("");
       setConnectError("");
+      setConnectStep("connect");
+      setAvailableSchemas([]);
+      setSelectedSchemas([]);
+      setPendingConnString("");
+      setPendingDetails(null);
+    } else {
+      // Closing the modal: drop any in-memory connection string + prefill ref.
+      setPendingConnString("");
+      setPendingDetails(null);
+      setPrefillConnectionId(null);
     }
   }, [showConnectModal]);
 
@@ -333,8 +390,22 @@ export default function DashboardPage() {
       const userStr = localStorage.getItem("user");
       if (userStr) setUser(JSON.parse(userStr));
       fetchFileTree();
+      fetchSavedConnections();
     }
   }, [fetchFileTree, isGuest, guestFiles]);
+
+  const fetchSavedConnections = useCallback(async () => {
+    try {
+      const res = await fetch("/api/connections");
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data?.success && Array.isArray(data.data)) {
+        setSavedConnections(data.data as SavedConnection[]);
+      }
+    } catch {
+      // non-fatal — saved connections are a convenience
+    }
+  }, []);
 
   useEffect(() => {
     if (!shareModal) {
@@ -373,12 +444,12 @@ export default function DashboardPage() {
   const handleLogout = async () => {
     if (isGuest) {
       setGuestMode(false);
-      router.push("/login");
+      router.push("/");
       return;
     }
     await fetch("/api/auth/logout", { method: "POST" });
     localStorage.removeItem("user");
-    router.push("/login");
+    router.push("/");
     router.refresh();
   };
 
@@ -454,62 +525,222 @@ export default function DashboardPage() {
     setHasChanges(true);
   };
 
+  // Build a connection string + best-effort field details (used for saving)
+  // and a display label from the current modal inputs.
+  const buildConnectionInputs = (): {
+    connectionString: string;
+    label: string;
+    details: { host: string; port: number; database: string; username: string; ssl: boolean } | null;
+  } | null => {
+    if (connectMode === "url") {
+      if (!connectString.trim()) return null;
+      const connectionString = connectString.trim();
+      let label = "Live DB";
+      let details: { host: string; port: number; database: string; username: string; ssl: boolean } | null = null;
+      try {
+        const url = new URL(connectionString);
+        const dbName = url.pathname.replace(/^\//, "");
+        const host = url.hostname;
+        if (dbName) label = `${dbName}@${host}`;
+        else if (host) label = host;
+        // Parse into fields so a URL-based connection can also be saved
+        // (without its password).
+        details = {
+          host,
+          port: url.port ? parseInt(url.port, 10) : 5432,
+          database: dbName,
+          username: decodeURIComponent(url.username || ""),
+          ssl: /sslmode=require/i.test(url.search),
+        };
+      } catch { /* ignore */ }
+      return { connectionString, label, details };
+    }
+    if (!connectHost.trim() || !connectDb.trim()) {
+      setConnectError("Host and database name are required");
+      return null;
+    }
+    const user = encodeURIComponent(connectUser.trim());
+    const pass = encodeURIComponent(connectPassword);
+    const host = connectHost.trim();
+    const port = connectPort.trim() || "5432";
+    const db = connectDb.trim();
+    const sslParam = connectSsl ? "?sslmode=require" : "";
+    const connectionString = user
+      ? `postgresql://${user}${pass ? `:${pass}` : ""}@${host}:${port}/${db}${sslParam}`
+      : `postgresql://${host}:${port}/${db}${sslParam}`;
+    return {
+      connectionString,
+      label: `${db}@${host}`,
+      details: { host, port: parseInt(port, 10) || 5432, database: db, username: connectUser.trim(), ssl: connectSsl },
+    };
+  };
+
+  // Step 1: connect and fetch the list of schemas to choose from.
   const handleConnectDb = async () => {
     setIsConnecting(true);
     setConnectError("");
-    let connectionString = "";
-    let label = "Live DB";
     try {
-      if (connectMode === "url") {
-        if (!connectString.trim()) { setIsConnecting(false); return; }
-        connectionString = connectString.trim();
-        try {
-          const url = new URL(connectionString);
-          const dbName = url.pathname.replace(/^\//, "");
-          const host = url.hostname;
-          if (dbName) label = `${dbName}@${host}`;
-          else if (host) label = host;
-        } catch { /* ignore */ }
-      } else {
-        if (!connectHost.trim() || !connectDb.trim()) {
-          setConnectError("Host and database name are required");
-          setIsConnecting(false);
-          return;
-        }
-        const user = encodeURIComponent(connectUser.trim());
-        const pass = encodeURIComponent(connectPassword);
-        const host = connectHost.trim();
-        const port = connectPort.trim() || "5432";
-        const db = connectDb.trim();
-        const sslParam = connectSsl ? "?sslmode=require" : "";
-        connectionString = user
-          ? `postgresql://${user}${pass ? `:${pass}` : ""}@${host}:${port}/${db}${sslParam}`
-          : `postgresql://${host}:${port}/${db}${sslParam}`;
-        label = `${db}@${host}`;
-      }
+      const inputs = buildConnectionInputs();
+      if (!inputs) { setIsConnecting(false); return; }
 
       const res = await fetch("/api/connect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ connectionString }),
+        body: JSON.stringify({ connectionString: inputs.connectionString, mode: "schemas" }),
       });
       const data = await res.json();
       if (!res.ok) {
         setConnectError(data.error || "Connection failed");
         return;
       }
+      const schemas: string[] = Array.isArray(data.schemas) ? data.schemas : [];
+      setAvailableSchemas(schemas);
+      // Pre-select: remembered choice (for saved conns) ∩ available, else public, else all.
+      const remembered = prefillConnectionId
+        ? savedConnections.find((c) => c.id === prefillConnectionId)?.schemas ?? []
+        : [];
+      const preselect = remembered.filter((s) => schemas.includes(s));
+      setSelectedSchemas(
+        preselect.length > 0 ? preselect : schemas.includes("public") ? ["public"] : schemas
+      );
+      setPendingConnString(inputs.connectionString);
+      setPendingDetails(inputs.details);
+      setConnectLabel(inputs.label);
+      setConnectStep("schemas");
+    } catch (err) {
+      setConnectError(err instanceof Error ? err.message : "Connection failed");
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  // Step 2: introspect the chosen schemas and open the live connection.
+  // `save` controls whether the connection is persisted (driven by which
+  // button the user clicks: "Only Visualise" vs "Save and Visualise").
+  const handleVisualizeSchemas = async (save: boolean) => {
+    if (selectedSchemas.length === 0) {
+      setConnectError("Select at least one schema");
+      return;
+    }
+    setIsConnecting(true);
+    setConnectError("");
+    try {
+      const res = await fetch("/api/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connectionString: pendingConnString, mode: "introspect", schemas: selectedSchemas }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setConnectError(data.error || "Introspection failed");
+        return;
+      }
+
+      // Optionally persist the connection (logged-in, password never stored).
+      let savedId: string | undefined = prefillConnectionId ?? undefined;
+      if (!isGuest && save && pendingDetails) {
+        try {
+          if (savedId) {
+            await fetch(`/api/connections/${savedId}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ label: connectLabel, ...pendingDetails, schemas: data.selectedSchemas ?? selectedSchemas }),
+            });
+          } else {
+            const saveRes = await fetch("/api/connections", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ label: connectLabel, ...pendingDetails, schemas: data.selectedSchemas ?? selectedSchemas }),
+            });
+            const saveData = await saveRes.json();
+            if (saveData?.success) savedId = saveData.data.id;
+          }
+          fetchSavedConnections();
+        } catch { /* non-fatal */ }
+      }
+
       const id = crypto.randomUUID();
-      setLiveConnections((prev) => [...prev, { id, dbml: data.dbml, label, tableCount: data.tableCount ?? 0, fkCount: data.fkCount ?? 0, fkRawCount: data.fkRawCount ?? 0, fkError: data.fkError ?? undefined }]);
+      setLiveConnections((prev) => [...prev, {
+        id,
+        dbml: data.dbml,
+        label: connectLabel,
+        tableCount: data.tableCount ?? 0,
+        fkCount: data.fkCount ?? 0,
+        fkRawCount: data.fkRawCount ?? 0,
+        fkError: data.fkError ?? undefined,
+        connString: pendingConnString,
+        allSchemas: Array.isArray(data.schemas) ? data.schemas : availableSchemas,
+        selectedSchemas: data.selectedSchemas ?? selectedSchemas,
+        savedId,
+      }]);
       setActiveLiveId(id);
       setSelectedFile(null);
       setShowConnectModal(false);
       setConnectString("");
       setConnectPassword("");
     } catch (err) {
-      setConnectError(err instanceof Error ? err.message : "Connection failed");
+      setConnectError(err instanceof Error ? err.message : "Introspection failed");
     } finally {
       setIsConnecting(false);
     }
+  };
+
+  // Re-introspect a live connection when the user changes which schemas are
+  // visible from the viewer dropdown. Persists the choice for saved conns.
+  const handleLiveSchemasChange = useCallback(async (liveId: string, nextSchemas: string[]) => {
+    const conn = liveConnections.find((c) => c.id === liveId);
+    if (!conn || nextSchemas.length === 0) return;
+    setReloadingLiveId(liveId);
+    try {
+      const res = await fetch("/api/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connectionString: conn.connString, mode: "introspect", schemas: nextSchemas }),
+      });
+      const data = await res.json();
+      if (!res.ok) return;
+      setLiveConnections((prev) => prev.map((c) => c.id === liveId ? {
+        ...c,
+        dbml: data.dbml,
+        tableCount: data.tableCount ?? 0,
+        fkCount: data.fkCount ?? 0,
+        fkRawCount: data.fkRawCount ?? 0,
+        fkError: data.fkError ?? undefined,
+        selectedSchemas: data.selectedSchemas ?? nextSchemas,
+      } : c));
+      if (conn.savedId) {
+        fetch(`/api/connections/${conn.savedId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ schemas: data.selectedSchemas ?? nextSchemas }),
+        }).then(() => fetchSavedConnections()).catch(() => {});
+      }
+    } catch { /* ignore */ } finally {
+      setReloadingLiveId((prev) => (prev === liveId ? null : prev));
+    }
+  }, [liveConnections, fetchSavedConnections]);
+
+  // Open the connect modal pre-filled from a saved connection.
+  const openSavedConnection = (conn: SavedConnection) => {
+    setConnectMode("fields");
+    setConnectHost(conn.host);
+    setConnectPort(String(conn.port));
+    setConnectDb(conn.database);
+    setConnectUser(conn.username);
+    setConnectSsl(conn.ssl);
+    setConnectPassword("");
+    setConnectLabel(conn.label);
+    setPrefillConnectionId(conn.id);
+    setConnectError("");
+    setConnectStep("connect");
+    setShowConnectModal(true);
+  };
+
+  const deleteSavedConnection = async (id: string) => {
+    try {
+      const res = await fetch(`/api/connections/${id}`, { method: "DELETE" });
+      if (res.ok) setSavedConnections((prev) => prev.filter((c) => c.id !== id));
+    } catch { /* ignore */ }
   };
 
   const handleDisconnect = (id: string) => {
@@ -1040,12 +1271,16 @@ export default function DashboardPage() {
         style={{ background: "#F5EFE7", borderColor: "#D9CDBF", padding: "0 24px" }}
       >
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
+          <button
+            onClick={() => router.push("/")}
+            className="flex items-center gap-2 hover:opacity-80"
+            title="Go to home"
+          >
             <div className="w-7 h-7 rounded-md flex items-center justify-center" style={{ background: "#9B8F5E" }}>
               <Database className="h-4 w-4 text-white" />
             </div>
             <span className="font-semibold text-sm" style={{ color: "#3E2723" }}>DB-Viz</span>
-          </div>
+          </button>
         </div>
 
         <div className="relative">
@@ -1434,6 +1669,42 @@ export default function DashboardPage() {
                       </div>
                     )}
 
+                    {/* Saved DB connections (logged-in users only) */}
+                    {!isGuest && savedConnections.length > 0 && (
+                      <div style={{ marginTop: "12px" }}>
+                        <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: "#8B7355", padding: "4px 4px 8px 4px", opacity: 0.7 }}>Saved Connections</div>
+                        {savedConnections.map((conn) => (
+                          <div
+                            key={conn.id}
+                            className="flex items-center gap-2 rounded-md cursor-pointer group"
+                            style={{ padding: "10px 12px", marginBottom: "4px" }}
+                            onClick={() => openSavedConnection(conn)}
+                            onMouseEnter={(e) => (e.currentTarget.style.background = "#EBE3D5")}
+                            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                            title="Click to reconnect (you'll re-enter the password)"
+                          >
+                            <Link className="h-4 w-4 flex-shrink-0" style={{ color: "#9B8F5E" }} />
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm truncate" style={{ color: "#3E2723" }}>{conn.label}</div>
+                              {conn.schemas.length > 0 && (
+                                <div className="text-xs truncate" style={{ color: "#8B7355", opacity: 0.8 }}>
+                                  {conn.schemas.join(", ")}
+                                </div>
+                              )}
+                            </div>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); deleteSavedConnection(conn.id); }}
+                              className="opacity-0 group-hover:opacity-100 rounded hover:opacity-80"
+                              style={{ padding: "4px" }}
+                              title="Delete saved connection"
+                            >
+                              <Trash2 className="h-3 w-3" style={{ color: "#C4756C" }} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
                     {isEmpty && liveConnections.length === 0 && (
                       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", padding: "32px 0", color: "#8B7355" }}>
                         <FileText style={{ width: "48px", height: "48px", marginBottom: "10px", opacity: 0.5 }} />
@@ -1493,14 +1764,28 @@ export default function DashboardPage() {
                       Disconnect
                     </button>
                   </div>
-                  <div className="flex-1 overflow-hidden">
+                  <div className="flex-1 overflow-hidden relative">
                     <DBViewer
                       dbmlContent={activeLiveConn.dbml}
                       fileName={activeLiveConn.label + ".dbml"}
                       layoutData=""
                       onLayoutChange={() => {}}
                       onTableSelect={() => {}}
+                      schemaOptions={activeLiveConn.allSchemas}
+                      selectedSchemas={activeLiveConn.selectedSchemas}
+                      onSchemasChange={(next) => handleLiveSchemasChange(activeLiveConn.id, next)}
                     />
+                    {reloadingLiveId === activeLiveConn.id && (
+                      <div
+                        className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3"
+                        style={{ background: "rgba(245,239,231,0.75)", backdropFilter: "blur(2px)" }}
+                      >
+                        <Loader2 className="h-7 w-7 animate-spin" style={{ color: "#9B8F5E" }} />
+                        <span className="text-sm font-medium" style={{ color: "#8B7355" }}>
+                          Loading schema…
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -1599,7 +1884,8 @@ export default function DashboardPage() {
               </button>
             </div>
 
-            {/* Tab switcher */}
+            {/* Tab switcher (step 1 only) */}
+            {connectStep === "connect" && (
             <div className="flex" style={{ padding: "0 24px", gap: "4px", marginBottom: "20px" }}>
               {(["url", "fields"] as const).map((mode) => (
                 <button
@@ -1619,9 +1905,67 @@ export default function DashboardPage() {
                 </button>
               ))}
             </div>
+            )}
 
             <div style={{ padding: "0 24px 24px 24px" }}>
-              {connectMode === "url" ? (
+              {connectStep === "schemas" ? (
+                <>
+                  <label className="text-xs font-medium block" style={{ color: "#8B7355", marginBottom: "8px" }}>
+                    Choose schemas to visualize
+                  </label>
+                  {availableSchemas.length === 0 ? (
+                    <p className="text-xs" style={{ color: "#8B7355", marginBottom: "16px" }}>
+                      No user schemas found in this database.
+                    </p>
+                  ) : (
+                    <div
+                      className="rounded-lg"
+                      style={{ background: "#F5EEE5", border: "1px solid #D9CDBF", padding: "8px", marginBottom: "12px", maxHeight: "200px", overflowY: "auto" }}
+                    >
+                      <label className="flex items-center gap-2 text-xs cursor-pointer" style={{ color: "#8B7355", padding: "6px 8px", borderBottom: "1px solid #E3D9CB", marginBottom: "4px" }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedSchemas.length === availableSchemas.length}
+                          ref={(el) => { if (el) el.indeterminate = selectedSchemas.length > 0 && selectedSchemas.length < availableSchemas.length; }}
+                          onChange={(e) => setSelectedSchemas(e.target.checked ? [...availableSchemas] : [])}
+                        />
+                        <span style={{ fontWeight: 600 }}>Select all</span>
+                      </label>
+                      {availableSchemas.map((schema) => (
+                        <label key={schema} className="flex items-center gap-2 text-sm cursor-pointer" style={{ color: "#3E2723", padding: "6px 8px" }}>
+                          <input
+                            type="checkbox"
+                            checked={selectedSchemas.includes(schema)}
+                            onChange={(e) => {
+                              setConnectError("");
+                              setSelectedSchemas((prev) =>
+                                e.target.checked ? [...prev, schema] : prev.filter((s) => s !== schema)
+                              );
+                            }}
+                          />
+                          <Database className="h-3.5 w-3.5" style={{ color: "#9B8F5E" }} />
+                          {schema}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {!isGuest && pendingDetails && pendingDetails.host && (
+                    <div style={{ marginBottom: "12px" }}>
+                      <label className="text-xs font-medium block" style={{ color: "#8B7355", marginBottom: "6px" }}>
+                        Connection name {prefillConnectionId ? "(updates saved connection)" : "(used when saving)"}
+                      </label>
+                      <input
+                        type="text"
+                        value={connectLabel}
+                        onChange={(e) => setConnectLabel(e.target.value)}
+                        placeholder="Connection name"
+                        className="w-full text-sm rounded-lg focus:outline-none"
+                        style={{ background: "#F5EEE5", color: "#3E2723", border: "1px solid #D9CDBF", padding: "10px 14px" }}
+                      />
+                    </div>
+                  )}
+                </>
+              ) : connectMode === "url" ? (
                 <>
                   <label className="text-xs font-medium block" style={{ color: "#8B7355", marginBottom: "8px" }}>
                     PostgreSQL connection string
@@ -1714,34 +2058,82 @@ export default function DashboardPage() {
                 </>
               )}
               <p className="text-xs" style={{ color: "#8B7355", marginBottom: "16px" }}>
-                Introspects the <strong>public</strong> schema. Credentials are not stored — used once to fetch the schema.
+                {connectStep === "schemas"
+                  ? "Only the selected schemas are introspected. You can change them later from the viewer."
+                  : "Your password is never stored. Other connection details can be saved (next step) so you don't have to retype them."}
               </p>
               {connectError && (
                 <p className="text-xs rounded-lg" style={{ color: "#C4756C", background: "#FDF0EE", border: "1px solid #F5C6BE", padding: "10px 14px", marginBottom: "16px" }}>
                   {connectError}
                 </p>
               )}
-              <div className="flex gap-3">
-                <button
-                  onClick={() => { setShowConnectModal(false); setConnectPassword(""); setConnectString(""); }}
-                  className="flex-1 text-sm rounded-lg hover:opacity-80"
-                  style={{ background: "#EBE3D5", color: "#8B7355", padding: "12px 20px" }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleConnectDb}
-                  disabled={isConnecting || (connectMode === "url" ? !connectString.trim() : !connectHost.trim() || !connectDb.trim())}
-                  className="flex-1 flex items-center justify-center gap-2 text-sm rounded-lg hover:opacity-90 disabled:opacity-50"
-                  style={{ background: "#9B8F5E", color: "#FFFFFF", padding: "12px 20px" }}
-                >
-                  {isConnecting ? (
-                    <><Loader2 className="h-4 w-4 animate-spin" /> Connecting...</>
-                  ) : (
-                    <><Link className="h-4 w-4" /> Connect</>
-                  )}
-                </button>
-              </div>
+              {connectStep === "schemas" ? (
+                (() => {
+                  const canSave = !isGuest && !!pendingDetails && !!pendingDetails.host;
+                  return (
+                    <div className="flex flex-col gap-3">
+                      <div className="flex gap-3">
+                        <button
+                          onClick={() => { setConnectStep("connect"); setConnectError(""); }}
+                          disabled={isConnecting}
+                          className="flex-1 text-sm rounded-lg hover:opacity-80 disabled:opacity-50"
+                          style={{ background: "#EBE3D5", color: "#8B7355", padding: "12px 20px" }}
+                        >
+                          Back
+                        </button>
+                        <button
+                          onClick={() => handleVisualizeSchemas(false)}
+                          disabled={isConnecting || selectedSchemas.length === 0}
+                          className="flex-1 flex items-center justify-center gap-2 text-sm rounded-lg hover:opacity-80 disabled:opacity-50"
+                          style={{ background: "#EBE3D5", color: "#8B7355", padding: "12px 20px" }}
+                        >
+                          {isConnecting ? (
+                            <><Loader2 className="h-4 w-4 animate-spin" /> Loading...</>
+                          ) : (
+                            <>Only Visualise ({selectedSchemas.length})</>
+                          )}
+                        </button>
+                      </div>
+                      {canSave && (
+                        <button
+                          onClick={() => handleVisualizeSchemas(true)}
+                          disabled={isConnecting || selectedSchemas.length === 0}
+                          className="flex items-center justify-center gap-2 text-sm rounded-lg hover:opacity-90 disabled:opacity-50"
+                          style={{ background: "#9B8F5E", color: "#FFFFFF", padding: "12px 20px" }}
+                        >
+                          {isConnecting ? (
+                            <><Loader2 className="h-4 w-4 animate-spin" /> Loading...</>
+                          ) : (
+                            <><Database className="h-4 w-4" /> {prefillConnectionId ? "Update & Visualise" : "Save and Visualise"} ({selectedSchemas.length})</>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()
+              ) : (
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => { setShowConnectModal(false); setConnectPassword(""); setConnectString(""); }}
+                    className="flex-1 text-sm rounded-lg hover:opacity-80"
+                    style={{ background: "#EBE3D5", color: "#8B7355", padding: "12px 20px" }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleConnectDb}
+                    disabled={isConnecting || (connectMode === "url" ? !connectString.trim() : !connectHost.trim() || !connectDb.trim())}
+                    className="flex-1 flex items-center justify-center gap-2 text-sm rounded-lg hover:opacity-90 disabled:opacity-50"
+                    style={{ background: "#9B8F5E", color: "#FFFFFF", padding: "12px 20px" }}
+                  >
+                    {isConnecting ? (
+                      <><Loader2 className="h-4 w-4 animate-spin" /> Connecting...</>
+                    ) : (
+                      <><Link className="h-4 w-4" /> Connect</>
+                    )}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>

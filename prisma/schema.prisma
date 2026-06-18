@@ -20,8 +20,26 @@ model User {
   filesSharedByMe     FileShare[]   @relation("FilesSharedByMe")
   foldersSharedWithMe FolderShare[] @relation("FoldersSharedWithMe")
   foldersSharedByMe   FolderShare[] @relation("FoldersSharedByMe")
+  connections         Connection[]
 
   @@map("users")
+}
+
+model Connection {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label     String
+  host      String
+  port      Int      @default(5432)
+  database  String
+  username  String   @default("")
+  ssl       Boolean  @default(false)
+  schemas   String   @default("[]") @db.Text // JSON array of selected schema names; password is never stored
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("connections")
 }
 
 model Folder {

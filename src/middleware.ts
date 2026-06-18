@@ -52,6 +52,7 @@ export const config = {
     "/login",
     "/api/folders/:path*",
     "/api/files/:path*",
+    "/api/connections/:path*",
     "/api/auth/me",
   ],
 };
