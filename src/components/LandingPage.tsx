@@ -10,6 +10,7 @@ import {
   UserCircle,
   LayoutGrid,
   ArrowRight,
+  Loader2,
   LucideIcon,
 } from "lucide-react";
 import { useGuest } from "@/lib/guest-context";
@@ -148,6 +149,12 @@ export default function LandingPage() {
   const { setGuestMode } = useGuest();
   const [current, setCurrent] = useState(0);
   const [fading, setFading] = useState(false);
+  const [isNavigatingToLogin, setIsNavigatingToLogin] = useState(false);
+
+  // Warm up the /login route so the click below doesn't wait on a cold compile/fetch.
+  useEffect(() => {
+    router.prefetch("/login");
+  }, [router]);
 
   const goTo = useCallback((i: number) => {
     setFading(true);
@@ -173,7 +180,10 @@ export default function LandingPage() {
     localStorage.removeItem("user");
     router.push("/dashboard");
   };
-  const goLogin = () => router.push("/login");
+  const goLogin = () => {
+    setIsNavigatingToLogin(true);
+    router.push("/login");
+  };
 
   return (
     <div className="min-h-screen" style={{ background: "var(--lp-bg)", color: "var(--lp-fg)" }}>
@@ -192,14 +202,18 @@ export default function LandingPage() {
           <div className="flex items-center gap-2">
             <button
               onClick={goLogin}
-              className="rounded-md px-4 py-2 text-sm font-medium transition-smooth"
+              disabled={isNavigatingToLogin}
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium transition-smooth disabled:cursor-not-allowed disabled:opacity-70"
               style={{ color: "var(--lp-primary)", border: "1px solid var(--lp-primary)" }}
+              onMouseEnter={(e) => (e.currentTarget.style.boxShadow = "var(--glow-subtle)")}
+              onMouseLeave={(e) => (e.currentTarget.style.boxShadow = "none")}
             >
+              {isNavigatingToLogin && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
               Log in
             </button>
             <button
               onClick={handleTry}
-              className="glow-subtle inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-semibold text-white transition-smooth hover:opacity-90"
+              className="glow-subtle inline-flex cursor-pointer items-center gap-1.5 rounded-md px-4 py-2 text-sm font-semibold text-white transition-smooth hover:opacity-90"
               style={{ background: "var(--lp-primary)" }}
             >
               Try DbViz <ArrowRight className="h-4 w-4" />
@@ -249,7 +263,7 @@ export default function LandingPage() {
             <div className="flex flex-col gap-4 pt-4 sm:flex-row">
               <button
                 onClick={handleTry}
-                className="glow-subtle group inline-flex items-center justify-center gap-2 rounded-lg px-8 py-3.5 text-base font-semibold text-white transition-smooth hover:opacity-90"
+                className="glow-subtle group inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg px-8 py-3.5 text-base font-semibold text-white transition-smooth hover:opacity-90"
                 style={{ background: "var(--lp-primary)" }}
                 onMouseEnter={(e) => (e.currentTarget.style.boxShadow = "var(--glow-primary)")}
                 onMouseLeave={(e) => (e.currentTarget.style.boxShadow = "var(--glow-subtle)")}
@@ -259,10 +273,13 @@ export default function LandingPage() {
               </button>
               <button
                 onClick={goLogin}
-                className="inline-flex items-center justify-center gap-2 rounded-lg px-8 py-3.5 text-base font-semibold transition-smooth"
+                disabled={isNavigatingToLogin}
+                className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg px-8 py-3.5 text-base font-semibold transition-smooth disabled:cursor-not-allowed disabled:opacity-70"
                 style={{ background: "var(--lp-card)", color: "var(--lp-primary)", border: "1px solid var(--lp-primary-softer)" }}
+                onMouseEnter={(e) => (e.currentTarget.style.borderColor = "var(--lp-primary)")}
+                onMouseLeave={(e) => (e.currentTarget.style.borderColor = "var(--lp-primary-softer)")}
               >
-                <UserCircle className="h-5 w-5" />
+                {isNavigatingToLogin ? <Loader2 className="h-5 w-5 animate-spin" /> : <UserCircle className="h-5 w-5" />}
                 Log in
               </button>
             </div>
@@ -298,7 +315,7 @@ export default function LandingPage() {
                       key={src}
                       onClick={() => goTo(i)}
                       aria-label={`Go to slide ${i + 1}`}
-                      className="h-2 rounded-full transition-all duration-300"
+                      className="h-2 cursor-pointer rounded-full transition-all duration-300"
                       style={{
                         width: i === current ? 32 : 8,
                         background: i === current ? "var(--lp-primary)" : "rgba(155,143,94,0.35)",
@@ -345,7 +362,7 @@ export default function LandingPage() {
             <div className="relative mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
               <button
                 onClick={handleTry}
-                className="group inline-flex items-center justify-center gap-2 rounded-lg px-8 py-3.5 text-base font-semibold text-white transition-smooth hover:opacity-90"
+                className="group inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg px-8 py-3.5 text-base font-semibold text-white transition-smooth hover:opacity-90"
                 style={{ background: "var(--lp-primary)" }}
               >
                 Try DbViz free
@@ -353,9 +370,13 @@ export default function LandingPage() {
               </button>
               <button
                 onClick={goLogin}
-                className="inline-flex items-center justify-center rounded-lg px-8 py-3.5 text-base font-semibold transition-smooth"
+                disabled={isNavigatingToLogin}
+                className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg px-8 py-3.5 text-base font-semibold transition-smooth disabled:cursor-not-allowed disabled:opacity-70"
                 style={{ color: "var(--lp-primary)", border: "1px solid var(--lp-primary)" }}
+                onMouseEnter={(e) => (e.currentTarget.style.boxShadow = "var(--glow-subtle)")}
+                onMouseLeave={(e) => (e.currentTarget.style.boxShadow = "none")}
               >
+                {isNavigatingToLogin && <Loader2 className="h-4 w-4 animate-spin" />}
                 Log in
               </button>
             </div>
@@ -379,10 +400,22 @@ export default function LandingPage() {
               </p>
             </div>
             <div className="flex flex-col items-center gap-3 md:items-end">
-              <button onClick={handleTry} className="text-sm font-medium transition-smooth" style={{ color: "var(--lp-muted-fg)" }}>
+              <button
+                onClick={handleTry}
+                className="cursor-pointer text-sm font-medium transition-smooth hover:opacity-80"
+                style={{ color: "var(--lp-muted-fg)" }}
+              >
                 Try DbViz
               </button>
-              <button onClick={goLogin} className="text-sm font-medium transition-smooth" style={{ color: "var(--lp-muted-fg)" }}>
+              <button
+                onClick={goLogin}
+                disabled={isNavigatingToLogin}
+                className="inline-flex cursor-pointer items-center gap-1.5 text-sm font-medium transition-smooth disabled:cursor-not-allowed disabled:opacity-70"
+                style={{ color: "var(--lp-muted-fg)" }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = "var(--lp-primary)")}
+                onMouseLeave={(e) => (e.currentTarget.style.color = "var(--lp-muted-fg)")}
+              >
+                {isNavigatingToLogin && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                 Log in
               </button>
             </div>

@@ -18,6 +18,7 @@ import {
   User,
   RefreshCw,
   Trash2,
+  Pencil,
   Upload,
   Save,
   Loader2,
@@ -1693,6 +1694,14 @@ export default function DashboardPage() {
                               )}
                             </div>
                             <button
+                              onClick={(e) => { e.stopPropagation(); openSavedConnection(conn); }}
+                              className="opacity-0 group-hover:opacity-100 rounded hover:opacity-80"
+                              style={{ padding: "4px" }}
+                              title="Edit saved connection"
+                            >
+                              <Pencil className="h-3 w-3" style={{ color: "#9B8F5E" }} />
+                            </button>
+                            <button
                               onClick={(e) => { e.stopPropagation(); deleteSavedConnection(conn.id); }}
                               className="opacity-0 group-hover:opacity-100 rounded hover:opacity-80"
                               style={{ padding: "4px" }}
@@ -1877,7 +1886,9 @@ export default function DashboardPage() {
             <div className="flex items-center justify-between" style={{ padding: "20px 24px 16px 24px" }}>
               <div className="flex items-center gap-3">
                 <Link className="h-5 w-5" style={{ color: "#9B8F5E" }} />
-                <h2 className="text-base font-semibold" style={{ color: "#3E2723" }}>Connect to a database</h2>
+                <h2 className="text-base font-semibold" style={{ color: "#3E2723" }}>
+                  {prefillConnectionId && connectStep === "connect" ? "Reconnect to database" : "Connect to a database"}
+                </h2>
               </div>
               <button onClick={() => { setShowConnectModal(false); setConnectPassword(""); setConnectString(""); }} className="hover:opacity-70 p-1">
                 <X className="h-5 w-5" style={{ color: "#8B7355" }} />
@@ -1993,7 +2004,7 @@ export default function DashboardPage() {
                         placeholder="localhost"
                         className="w-full text-sm rounded-lg focus:outline-none"
                         style={{ background: "#F5EEE5", color: "#3E2723", border: "1px solid #D9CDBF", padding: "10px 14px" }}
-                        autoFocus
+                        autoFocus={!prefillConnectionId}
                       />
                     </div>
                     <div style={{ flex: 1 }}>
@@ -2042,6 +2053,7 @@ export default function DashboardPage() {
                         className="w-full text-sm rounded-lg focus:outline-none"
                         style={{ background: "#F5EEE5", color: "#3E2723", border: "1px solid #D9CDBF", padding: "10px 14px" }}
                         autoComplete="current-password"
+                        autoFocus={!!prefillConnectionId}
                         onKeyDown={(e) => { if (e.key === "Enter" && !isConnecting) handleConnectDb(); }}
                       />
                     </div>

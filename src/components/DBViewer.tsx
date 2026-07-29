@@ -796,6 +796,9 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTa
           onEdgesChange={onEdgesChange}
           nodeTypes={nodeTypes}
           fitView
+          fitViewOptions={{ padding: 0.1, maxZoom: 1 }}
+          minZoom={0.05}
+          maxZoom={2}
           proOptions={{ hideAttribution: true }}
           panOnDrag={isInteractive}
           zoomOnScroll={isInteractive}
