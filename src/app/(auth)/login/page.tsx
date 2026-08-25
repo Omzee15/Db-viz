@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Loader2, UserCircle } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useGuest } from "@/lib/guest-context";
 
 export default function LoginPage() {
@@ -65,10 +65,9 @@ export default function LoginPage() {
     }
   };
 
-  const handleGuestMode = () => {
-    setGuestMode(true);
-    localStorage.removeItem("user");
-    router.push("/dashboard");
+  const handleToggleMode = () => {
+    setIsRegistering(!isRegistering);
+    setError("");
   };
 
   return (
@@ -158,7 +157,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={isLoading}
-              className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 w-full text-white"
+              className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed w-full text-white"
               style={{ background: '#9B8F5E', height: '36px', padding: '6px 16px' }}
             >
               {isLoading ? (
@@ -182,40 +181,19 @@ export default function LoginPage() {
 
           <button
             type="button"
-            onClick={handleGuestMode}
-            className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 w-full"
-            style={{ 
+            onClick={handleToggleMode}
+            className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 w-full"
+            style={{
               marginTop: '16px',
-              background: 'transparent', 
+              background: 'transparent',
               border: '1px solid #9B8F5E',
               color: '#9B8F5E',
-              height: '36px', 
-              padding: '6px 16px' 
+              height: '36px',
+              padding: '6px 16px'
             }}
           >
-            <UserCircle className="h-4 w-4" />
-            Continue as guest
+            {isRegistering ? "SIGN IN" : "CREATE ACCOUNT"}
           </button>
-
-          <p className="text-xs text-center" style={{ marginTop: '8px', color: '#8B7355' }}>
-            Guest files are stored locally and will be lost when you close the tab
-          </p>
-
-          <div style={{ marginTop: '16px', textAlign: 'center' }}>
-            <button
-              type="button"
-              onClick={() => {
-                setIsRegistering(!isRegistering);
-                setError("");
-              }}
-              className="text-xs hover:underline"
-              style={{ color: '#9B8F5E' }}
-            >
-              {isRegistering
-                ? "Already have an account? Sign in"
-                : "Don't have an account? Create one"}
-            </button>
-          </div>
         </div>
       </div>
     </div>

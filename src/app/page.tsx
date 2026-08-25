@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import Script from "next/script";
 import { getSession } from "@/lib/auth";
 import LandingPage from "@/components/LandingPage";
 
@@ -11,5 +12,10 @@ export default async function Home() {
     redirect("/dashboard");
   }
 
-  return <LandingPage />;
+  return (
+    <>
+      <Script async src="http://localhost:8081/p.js" data-id="PLS-C8BVRU88" />
+      <LandingPage />
+    </>
+  );
 }
