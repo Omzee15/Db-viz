@@ -526,6 +526,13 @@ export default function DashboardPage() {
     setHasChanges(true);
   };
 
+  // Applied when the user edits the schema from the visual DB Viewer (adding a
+  // table or a new column). Keeps the text editor as the single source of truth.
+  const handleDbmlChange = (nextContent: string) => {
+    setDbmlContent(nextContent);
+    setHasChanges(true);
+  };
+
   // Build a connection string + best-effort field details (used for saving)
   // and a display label from the current modal inputs.
   const buildConnectionInputs = (): {
@@ -1744,6 +1751,11 @@ export default function DashboardPage() {
                   layoutData={fileLayoutData}
                   onLayoutChange={handleLayoutChange}
                   onTableSelect={handleTableSelect}
+                  onDbmlChange={
+                    selectedFile.isSharedWithMe && !selectedFile.canWrite
+                      ? undefined
+                      : handleDbmlChange
+                  }
                 />
               );
             }

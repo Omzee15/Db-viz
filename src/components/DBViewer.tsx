@@ -10,6 +10,7 @@ import {
   useNodesState,
   useEdgesState,
   useReactFlow,
+  useUpdateNodeInternals,
   ReactFlowProvider,
   Panel,
   Handle,
@@ -27,6 +28,8 @@ import {
   Layers,
   ChevronDown,
   Loader2,
+  Plus,
+  X,
 } from "lucide-react";
 
 // PostgreSQL reserved keywords that @dbml/core's ANTLR parser cannot accept as
@@ -63,6 +66,188 @@ function quoteReservedColumnNames(sql: string): string {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Schema-text editing helpers
+//
+// The text editor (DBML or SQL) is the single source of truth. When the user
+// adds a table or a column from the visual viewer we splice the change into the
+// existing text rather than regenerating it, so comments / formatting / enums
+// are preserved.
+// ---------------------------------------------------------------------------
+
+const escapeRegExp = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const isSqlFileName = (fileName: string) =>
+  fileName.toLowerCase().endsWith(".sql");
+
+/** Append a new empty table definition to the schema text. */
+function appendTableToText(
+  content: string,
+  fileName: string,
+  tableName: string
+): string {
+  const trimmed = content.replace(/\s+$/, "");
+  const gap = trimmed.length > 0 ? "\n\n" : "";
+
+  if (isSqlFileName(fileName)) {
+    const block = `CREATE TABLE ${tableName} (\n  id serial PRIMARY KEY\n);`;
+    return `${trimmed}${gap}${block}\n`;
+  }
+
+  const block = `Table ${tableName} {\n  id int [pk]\n}`;
+  return `${trimmed}${gap}${block}\n`;
+}
+
+/** Locate the body span { ... } / ( ... ) of a table definition in the text.
+ *  Returns the index just before the closing brace/paren, plus the indent used
+ *  by the existing column lines (best effort). */
+function findTableInsertionPoint(
+  content: string,
+  fileName: string,
+  tableName: string
+): { insertAt: number; indent: string } | null {
+  const escaped = escapeRegExp(tableName);
+  const isSql = isSqlFileName(fileName);
+
+  const headerRe = isSql
+    ? new RegExp(
+        `\\bCREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?["\`]?${escaped}["\`]?\\s*\\(`,
+        "i"
+      )
+    : new RegExp(`\\bTable\\s+["\`]?${escaped}["\`]?\\s*(?:as\\s+\\w+\\s*)?\\{`, "i");
+
+  const header = headerRe.exec(content);
+  if (!header || header.index === undefined) return null;
+
+  const open = isSql ? "(" : "{";
+  const close = isSql ? ")" : "}";
+  const bodyStart = content.indexOf(open, header.index + header[0].length - 1);
+  if (bodyStart === -1) return null;
+
+  // Walk forward tracking nesting to find the matching close.
+  let depth = 0;
+  let bodyEnd = -1;
+  for (let i = bodyStart; i < content.length; i++) {
+    const ch = content[i];
+    if (ch === open) depth++;
+    else if (ch === close) {
+      depth--;
+      if (depth === 0) {
+        bodyEnd = i;
+        break;
+      }
+    }
+  }
+  if (bodyEnd === -1) return null;
+
+  const body = content.slice(bodyStart + 1, bodyEnd);
+  const indentMatch = body.match(/\n([ \t]+)\S/);
+  const indent = indentMatch ? indentMatch[1] : "  ";
+
+  // Insert right after the last non-blank line inside the body.
+  let insertAt = bodyEnd;
+  while (insertAt > bodyStart + 1 && /\s/.test(content[insertAt - 1])) {
+    insertAt--;
+  }
+
+  return { insertAt, indent };
+}
+
+/** Add a new column to an existing table.
+ *
+ *  For DBML we splice a new field line into the table body. For SQL we append
+ *  an `ALTER TABLE ... ADD COLUMN` statement instead of editing the CREATE
+ *  TABLE body — that stays valid regardless of trailing table constraints. */
+function addColumnToText(
+  content: string,
+  fileName: string,
+  tableName: string,
+  columnName: string,
+  columnType: string
+): string | null {
+  if (isSqlFileName(fileName)) {
+    // Confirm the table actually exists in the text first.
+    const escaped = escapeRegExp(tableName);
+    const existsRe = new RegExp(
+      `\\bCREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?["\`]?${escaped}["\`]?\\s*\\(`,
+      "i"
+    );
+    if (!existsRe.test(content)) return null;
+    const type = columnType.trim() || "text";
+    const trimmed = content.replace(/\s+$/, "");
+    return `${trimmed}\n\nALTER TABLE ${tableName} ADD COLUMN ${columnName} ${type};\n`;
+  }
+
+  const point = findTableInsertionPoint(content, fileName, tableName);
+  if (!point) return null;
+  const { insertAt, indent } = point;
+  const type = columnType.trim() || "varchar";
+  const line = `\n${indent}${columnName} ${type}`;
+  return content.slice(0, insertAt) + line + content.slice(insertAt);
+}
+
+/** Add a foreign key from sourceTable.sourceColumn -> targetTable.targetColumn.
+ *
+ *  DBML: append a `Ref` line. SQL: append an `ALTER TABLE ... ADD CONSTRAINT
+ *  ... FOREIGN KEY` statement. Returns null if either table is missing, or if
+ *  an identical reference already exists in the text. */
+function addForeignKeyToText(
+  content: string,
+  fileName: string,
+  sourceTable: string,
+  sourceColumn: string,
+  targetTable: string,
+  targetColumn: string
+): string | null {
+  const trimmed = content.replace(/\s+$/, "");
+
+  if (isSqlFileName(fileName)) {
+    const st = escapeRegExp(sourceTable);
+    const tt = escapeRegExp(targetTable);
+    const createRe = (t: string) =>
+      new RegExp(
+        `\\bCREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?["\`]?${t}["\`]?\\s*\\(`,
+        "i"
+      );
+    if (!createRe(st).test(content) || !createRe(tt).test(content)) return null;
+
+    // Skip if the same FK already exists.
+    const dupeRe = new RegExp(
+      `ALTER\\s+TABLE\\s+["\`]?${st}["\`]?\\s+ADD\\s+CONSTRAINT[\\s\\S]*?FOREIGN\\s+KEY\\s*\\(\\s*["\`]?${escapeRegExp(
+        sourceColumn
+      )}["\`]?\\s*\\)\\s*REFERENCES\\s+["\`]?${tt}["\`]?`,
+      "i"
+    );
+    if (dupeRe.test(content)) return null;
+
+    const constraintName = `fk_${sourceTable}_${sourceColumn}_${targetTable}`.slice(
+      0,
+      63
+    );
+    const stmt = `ALTER TABLE ${sourceTable} ADD CONSTRAINT ${constraintName} FOREIGN KEY (${sourceColumn}) REFERENCES ${targetTable} (${targetColumn});`;
+    return `${trimmed}\n\n${stmt}\n`;
+  }
+
+  // DBML: make sure both tables are defined.
+  const tableRe = (t: string) =>
+    new RegExp(`\\bTable\\s+["\`]?${escapeRegExp(t)}["\`]?\\s*(?:as\\s+\\w+\\s*)?\\{`, "i");
+  if (!tableRe(sourceTable).test(content) || !tableRe(targetTable).test(content)) {
+    return null;
+  }
+
+  const dupeRe = new RegExp(
+    `\\bRef\\b[^\\n]*\\b${escapeRegExp(sourceTable)}\\.${escapeRegExp(
+      sourceColumn
+    )}\\b[^\\n]*\\b${escapeRegExp(targetTable)}\\.${escapeRegExp(targetColumn)}\\b`,
+    "i"
+  );
+  if (dupeRe.test(content)) return null;
+
+  const ref = `Ref: ${sourceTable}.${sourceColumn} > ${targetTable}.${targetColumn}`;
+  return `${trimmed}\n\n${ref}\n`;
+}
+
 interface Column {
   name: string;
   type: string;
@@ -75,6 +260,17 @@ interface Column {
 interface TableNodeData extends Record<string, unknown> {
   name: string;
   columns: Column[];
+  // Present only when the schema is editable. Lets the table header show a
+  // "+" button that adds a new column.
+  onAddColumn?: (tableName: string) => void;
+  // Field-level FK drag-to-connect. `armedColumn` is the column the user
+  // double-clicked to start a connection from (only meaningful on that table's
+  // node); `connecting` is true on every node while a drag is in progress;
+  // `onArmColumn` toggles the armed field.
+  connectable?: boolean;
+  armedColumn?: string | null;
+  connecting?: boolean;
+  onArmColumn?: (tableName: string, columnName: string) => void;
 }
 
 type TableNodeType = Node<TableNodeData, "table">;
@@ -85,6 +281,10 @@ interface DBViewerProps {
   layoutData: string;
   onLayoutChange: (layoutData: string) => void;
   onTableSelect?: (tableName: string) => void;
+  // When provided, the viewer becomes editable: an "Add table" button appears
+  // in the toolbar and each table gets a "+" button to add a column. The new
+  // schema text (DBML or SQL, matching the file) is passed back here.
+  onDbmlChange?: (nextContent: string) => void;
   // Live-connection schema controls. When provided, a "Schemas" dropdown is
   // shown next to the search box so the user can change which schemas are
   // visualized. Omitted for plain file viewing.
@@ -94,8 +294,16 @@ interface DBViewerProps {
 }
 
 // Custom Table Node Component - Solarized Light theme like Project-Nest
-function TableNode({ data }: NodeProps<TableNodeType>) {
+function TableNode({ id, data }: NodeProps<TableNodeType>) {
   const [isExpanded, setIsExpanded] = useState(true);
+  const updateNodeInternals = useUpdateNodeInternals();
+
+  // ReactFlow caches each node's handle geometry; re-measure whenever the set
+  // of field handles or their arm state changes, otherwise drops onto field
+  // handles are not detected.
+  useEffect(() => {
+    updateNodeInternals(id);
+  }, [id, isExpanded, data.armedColumn, data.connecting, data.connectable, data.columns, updateNodeInternals]);
 
   return (
     <div className="relative rounded-lg shadow-md min-w-[250px] max-w-[350px] overflow-hidden" style={{ background: '#E8DFD0', border: '1px solid #D9CDBF' }}>
@@ -126,37 +334,130 @@ function TableNode({ data }: NodeProps<TableNodeType>) {
           <Database className="h-4 w-4" />
           {data.name}
         </div>
-        <button
-          onClick={() => setIsExpanded(!isExpanded)}
-          className="hover:bg-white/20 rounded text-white"
-          style={{ padding: '4px' }}
-        >
-          {isExpanded ? (
-            <EyeOff className="h-3 w-3" />
-          ) : (
-            <Eye className="h-3 w-3" />
+        <div className="flex items-center" style={{ gap: '2px' }}>
+          {data.onAddColumn && (
+            <button
+              onClick={() => data.onAddColumn?.(data.name)}
+              className="hover:bg-white/20 rounded text-white"
+              style={{ padding: '4px' }}
+              title="Add row (column)"
+            >
+              <Plus className="h-3 w-3" />
+            </button>
           )}
-        </button>
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="hover:bg-white/20 rounded text-white"
+            style={{ padding: '4px' }}
+            title={isExpanded ? "Hide columns" : "Show columns"}
+          >
+            {isExpanded ? (
+              <EyeOff className="h-3 w-3" />
+            ) : (
+              <Eye className="h-3 w-3" />
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Columns */}
       {isExpanded && (
         <div style={{ padding: '8px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-            {data.columns?.map((column, index) => (
+            {data.columns?.map((column, index) => {
+              const isArmed = data.armedColumn === column.name;
+              return (
               <div
                 key={index}
-                className="flex items-center justify-between text-xs rounded"
-                style={{ 
+                className={`relative flex items-center justify-between text-xs rounded${data.connectable ? " nodrag" : ""}`}
+                onDoubleClickCapture={
+                  data.connectable
+                    ? (e) => {
+                        e.stopPropagation();
+                        data.onArmColumn?.(data.name, column.name);
+                      }
+                    : undefined
+                }
+                style={{
                   padding: '5px 8px',
-                  background: column.isPrimary ? 'rgba(196, 117, 108, 0.15)' : 
-                              column.isForeign ? 'rgba(90, 130, 170, 0.15)' : 
+                  cursor: data.connectable ? (isArmed ? 'crosshair' : 'pointer') : undefined,
+                  background: isArmed ? 'rgba(155, 143, 94, 0.28)' :
+                              column.isPrimary ? 'rgba(196, 117, 108, 0.15)' :
+                              column.isForeign ? 'rgba(90, 130, 170, 0.15)' :
                               'transparent',
-                  borderLeft: column.isPrimary ? '3px solid #C4756C' : 
-                              column.isForeign ? '3px solid #5A82AA' : 
+                  borderLeft: isArmed ? '3px solid #9B8F5E' :
+                              column.isPrimary ? '3px solid #C4756C' :
+                              column.isForeign ? '3px solid #5A82AA' :
                               '3px solid transparent'
                 }}
               >
+                {data.connectable && (
+                  <>
+                    {/* Drop target: every field can receive a FK. Kept mounted
+                        at all times so ReactFlow has its geometry; enlarged and
+                        visible only while a connection drag is active. */}
+                    <Handle
+                      type="target"
+                      id={`${column.name}__t`}
+                      position={Position.Left}
+                      isConnectableStart={false}
+                      isConnectable={!!data.connecting && !isArmed}
+                      style={{
+                        left: -7,
+                        width: data.connecting ? 14 : 8,
+                        height: data.connecting ? 14 : 8,
+                        borderRadius: '50%',
+                        background: data.connecting ? '#9B8F5E' : 'transparent',
+                        border: data.connecting ? '2px solid #FFFFFF' : 'none',
+                        opacity: data.connecting && !isArmed ? 0.9 : 0,
+                        transition: 'opacity 0.1s',
+                      }}
+                    />
+                    {/* FK source dot: only the armed field shows one. */}
+                    <Handle
+                      type="source"
+                      id={`${column.name}__s`}
+                      position={Position.Right}
+                      isConnectableStart={isArmed}
+                      isConnectableEnd={false}
+                      isConnectable={isArmed}
+                      style={{
+                        right: -7,
+                        width: isArmed ? 14 : 8,
+                        height: isArmed ? 14 : 8,
+                        borderRadius: '50%',
+                        background: isArmed ? '#9B8F5E' : 'transparent',
+                        border: isArmed ? '2px solid #FFFFFF' : 'none',
+                        opacity: isArmed ? 1 : 0,
+                        cursor: 'crosshair',
+                      }}
+                    />
+                    {/* When armed, a transparent full-row source handle so the
+                        user can start the drag from anywhere on the field. */}
+                    {isArmed && (
+                      <Handle
+                        type="source"
+                        id={`${column.name}__srow`}
+                        position={Position.Right}
+                        isConnectableStart
+                        isConnectableEnd={false}
+                        style={{
+                          left: 0,
+                          top: 0,
+                          transform: 'none',
+                          width: '100%',
+                          height: '100%',
+                          borderRadius: 6,
+                          background: 'transparent',
+                          border: 'none',
+                          opacity: 0,
+                          cursor: 'crosshair',
+                          zIndex: 1,
+                        }}
+                      />
+                    )}
+                  </>
+                )}
                 <div className="flex items-center flex-1 min-w-0" style={{ gap: '8px' }}>
                   <span
                     className="font-medium truncate"
@@ -205,7 +506,8 @@ function TableNode({ data }: NodeProps<TableNodeType>) {
                   )}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -218,7 +520,7 @@ const nodeTypes = {
 };
 
 // Inner component that uses ReactFlow hooks
-function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTableSelect, schemaOptions, selectedSchemas, onSchemasChange }: DBViewerProps) {
+function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTableSelect, onDbmlChange, schemaOptions, selectedSchemas, onSchemasChange }: DBViewerProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<TableNodeType>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [error, setError] = useState<string | null>(null);
@@ -232,6 +534,183 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTa
   const schemaRef = useRef<HTMLDivElement>(null);
   const isRestoring = useRef(false);
   const lockWarningTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  const editable = typeof onDbmlChange === "function";
+  // Latest schema text, kept in a ref so the memoized node data callbacks always
+  // splice into the current version.
+  const dbmlContentRef = useRef(dbmlContent);
+  useEffect(() => {
+    dbmlContentRef.current = dbmlContent;
+  }, [dbmlContent]);
+
+  // "Add table" prompt (toolbar) and "Add column" prompt (per table).
+  const [showAddTable, setShowAddTable] = useState(false);
+  const [newTableName, setNewTableName] = useState("");
+  const [addColumnFor, setAddColumnFor] = useState<string | null>(null);
+  const [newColumnName, setNewColumnName] = useState("");
+  const [newColumnType, setNewColumnType] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
+  const isSql = fileName.toLowerCase().endsWith(".sql");
+
+  // Field the user double-clicked to start dragging a foreign key from.
+  const [armedField, setArmedField] = useState<{
+    table: string;
+    column: string;
+  } | null>(null);
+  const armedFieldRef = useRef(armedField);
+  const updateNodeInternals = useUpdateNodeInternals();
+  useEffect(() => {
+    armedFieldRef.current = armedField;
+    // Push the armed-column marker into node data without re-parsing the schema.
+    // `armedColumn` is set only on the armed table; `connecting` is set on every
+    // node so all tables re-render their field handles as active drop targets.
+    const connecting = armedField != null;
+    const changedIds: string[] = [];
+    setNodes((nds) =>
+      nds.map((n) => {
+        const nextArmed =
+          armedField && armedField.table === n.id ? armedField.column : null;
+        if (n.data.armedColumn === nextArmed && n.data.connecting === connecting) {
+          return n;
+        }
+        changedIds.push(n.id);
+        return {
+          ...n,
+          data: { ...n.data, armedColumn: nextArmed, connecting },
+        };
+      })
+    );
+    // Let ReactFlow re-measure the handle geometry after the DOM updates.
+    const raf = requestAnimationFrame(() => {
+      changedIds.forEach((nid) => updateNodeInternals(nid));
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [armedField, setNodes, updateNodeInternals]);
+  // Transient toast shown after a FK is created / rejected.
+  const [connectToast, setConnectToast] = useState<string | null>(null);
+  const connectToastTimeout = useRef<NodeJS.Timeout | null>(null);
+  const flashToast = useCallback((msg: string) => {
+    setConnectToast(msg);
+    if (connectToastTimeout.current) clearTimeout(connectToastTimeout.current);
+    connectToastTimeout.current = setTimeout(() => setConnectToast(null), 2500);
+  }, []);
+
+  const handleAddTable = useCallback(() => {
+    const name = newTableName.trim();
+    if (!name) return;
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+      setEditError("Table name must be a valid identifier");
+      return;
+    }
+    if (nodes.some((n) => n.id.toLowerCase() === name.toLowerCase())) {
+      setEditError(`Table "${name}" already exists`);
+      return;
+    }
+    onDbmlChange?.(appendTableToText(dbmlContentRef.current, fileName, name));
+    setNewTableName("");
+    setShowAddTable(false);
+    setEditError(null);
+  }, [newTableName, nodes, fileName, onDbmlChange]);
+
+  // Stable so it can be baked into node data without re-parsing.
+  const openAddColumn = useCallback((tableName: string) => {
+    setAddColumnFor(tableName);
+    setNewColumnName("");
+    setNewColumnType("");
+    setEditError(null);
+  }, []);
+
+  // Double-click a field to arm it as the FK source (toggles off if it's
+  // already the armed field). Stable so it can live in node data.
+  const armColumn = useCallback((tableName: string, columnName: string) => {
+    setArmedField((prev) =>
+      prev && prev.table === tableName && prev.column === columnName
+        ? null
+        : { table: tableName, column: columnName }
+    );
+  }, []);
+
+  // Field handle ids are `<column>__s` / `__srow` (source) and `<column>__t`
+  // (target); strip the suffix back to the column name.
+  const columnFromHandle = (h?: string | null) =>
+    h ? h.replace(/__(s|srow|t)$/, "") : undefined;
+
+  // Fired when the user finishes dragging from an armed field's handle onto
+  // another field's handle.
+  const handleConnect = useCallback(
+    (conn: {
+      source?: string | null;
+      target?: string | null;
+      sourceHandle?: string | null;
+      targetHandle?: string | null;
+    }) => {
+      const armed = armedFieldRef.current;
+      const sourceTable = conn.source ?? undefined;
+      const targetTable = conn.target ?? undefined;
+      const sourceColumn =
+        columnFromHandle(conn.sourceHandle) ?? armed?.column ?? undefined;
+      const targetColumn = columnFromHandle(conn.targetHandle);
+
+      if (!sourceTable || !targetTable || !sourceColumn || !targetColumn) {
+        flashToast("Drop onto a field to create a foreign key");
+        return;
+      }
+      if (sourceTable === targetTable && sourceColumn === targetColumn) {
+        setArmedField(null);
+        return;
+      }
+
+      const next = addForeignKeyToText(
+        dbmlContentRef.current,
+        fileName,
+        sourceTable,
+        sourceColumn,
+        targetTable,
+        targetColumn
+      );
+      setArmedField(null);
+      if (!next) {
+        flashToast("That foreign key already exists");
+        return;
+      }
+      onDbmlChange?.(next);
+      flashToast(
+        `FK: ${sourceTable}.${sourceColumn} → ${targetTable}.${targetColumn}`
+      );
+    },
+    [fileName, onDbmlChange, flashToast]
+  );
+
+  const handleAddColumn = useCallback(() => {
+    const table = addColumnFor;
+    const name = newColumnName.trim();
+    if (!table || !name) return;
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+      setEditError("Column name must be a valid identifier");
+      return;
+    }
+    const node = nodes.find((n) => n.id === table);
+    if (node?.data.columns?.some((c) => c.name.toLowerCase() === name.toLowerCase())) {
+      setEditError(`Column "${name}" already exists in ${table}`);
+      return;
+    }
+    const next = addColumnToText(
+      dbmlContentRef.current,
+      fileName,
+      table,
+      name,
+      newColumnType
+    );
+    if (!next) {
+      setEditError(`Couldn't locate table "${table}" in the source text`);
+      return;
+    }
+    onDbmlChange?.(next);
+    setNewColumnName("");
+    setNewColumnType("");
+    setAddColumnFor(null);
+    setEditError(null);
+  }, [addColumnFor, newColumnName, newColumnType, nodes, fileName, onDbmlChange]);
 
   // Show lock warning when trying to interact with locked canvas
   const handleLockedInteraction = () => {
@@ -266,6 +745,16 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTa
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Escape cancels an armed FK-connect.
+  useEffect(() => {
+    if (!armedField) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setArmedField(null);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [armedField]);
 
   // Parse DBML when content changes
   useEffect(() => {
@@ -414,13 +903,39 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTa
     const withoutBlockComments = content.replace(/\/\*[\s\S]*?\*\//g, "");
     const withoutLineComments = withoutBlockComments.replace(/--.*$/gm, "");
     const statements = withoutLineComments.split(";");
-    const relevantStatements = statements
-      .map((stmt) => stmt.trim())
-      .filter(
-        (stmt) =>
-          /^CREATE\s+TABLE\b/i.test(stmt) ||
-          /^ALTER\s+TABLE\b[\s\S]*?FOREIGN\s+KEY/i.test(stmt)
+    const trimmedStatements = statements.map((stmt) => stmt.trim());
+
+    let relevantStatements = trimmedStatements.filter(
+      (stmt) =>
+        /^CREATE\s+TABLE\b/i.test(stmt) ||
+        /^ALTER\s+TABLE\b[\s\S]*?FOREIGN\s+KEY/i.test(stmt)
+    );
+
+    // The @dbml/core importer ignores `ALTER TABLE ... ADD COLUMN`, so fold
+    // those columns into the matching CREATE TABLE body before importing. This
+    // is what makes viewer-added columns (which we persist as ALTER statements)
+    // show up in the diagram.
+    const addColumnStmts = trimmedStatements.filter((stmt) =>
+      /^ALTER\s+TABLE\b[\s\S]*?\bADD\s+COLUMN\b/i.test(stmt)
+    );
+    for (const alter of addColumnStmts) {
+      const m = alter.match(
+        /^ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?["`]?([A-Za-z_][A-Za-z0-9_]*)["`]?\s+ADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?([\s\S]+)$/i
       );
+      if (!m) continue;
+      const [, tbl, colDef] = m;
+      const createRe = new RegExp(
+        `(CREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?["\`]?${escapeRegExp(
+          tbl
+        )}["\`]?\\s*\\([\\s\\S]*?)(\\n?\\s*\\)\\s*)$`,
+        "i"
+      );
+      relevantStatements = relevantStatements.map((stmt) =>
+        createRe.test(stmt)
+          ? stmt.replace(createRe, `$1,\n  ${colDef.trim()}$2`)
+          : stmt
+      );
+    }
 
     if (relevantStatements.length === 0) return "";
     const joined = relevantStatements.join(";\n\n") + ";";
@@ -504,6 +1019,13 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTa
               data: {
                 name: table.name,
                 columns: columns,
+                onAddColumn: editable ? openAddColumn : undefined,
+                connectable: editable,
+                onArmColumn: editable ? armColumn : undefined,
+                armedColumn:
+                  armedFieldRef.current?.table === table.name
+                    ? armedFieldRef.current.column
+                    : null,
               },
               draggable: true,
             };
@@ -576,7 +1098,7 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTa
         setIsLoading(false);
       }
     },
-    [fitView, restoreLayout, setEdges, setNodes, fileName]
+    [fitView, restoreLayout, setEdges, setNodes, fileName, editable, openAddColumn, armColumn]
   );
 
   const handleNodesChange = useCallback(
@@ -749,6 +1271,70 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTa
             )}
           </div>
 
+          {editable && (
+            <div className="relative">
+              <button
+                onClick={() => {
+                  setShowAddTable((v) => !v);
+                  setNewTableName("");
+                  setEditError(null);
+                }}
+                className="flex items-center gap-2 text-sm rounded-md hover:opacity-90"
+                style={{ background: '#9B8F5E', border: '1px solid #9B8F5E', color: '#FFFFFF', padding: '8px 16px' }}
+                title="Add a new table"
+              >
+                <Plus className="h-4 w-4" />
+                Add table
+              </button>
+              {showAddTable && (
+                <div
+                  className="absolute top-full right-0 mt-1 rounded-md shadow-lg z-50"
+                  style={{ background: '#FFFFFF', border: '1px solid #D9CDBF', padding: '12px', minWidth: '260px' }}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#8B7355' }}>
+                      New {isSql ? 'SQL' : 'DBML'} table
+                    </span>
+                    <button
+                      onClick={() => { setShowAddTable(false); setEditError(null); }}
+                      className="rounded hover:opacity-70"
+                      style={{ padding: '2px' }}
+                    >
+                      <X className="h-3.5 w-3.5" style={{ color: '#8B7355' }} />
+                    </button>
+                  </div>
+                  <input
+                    autoFocus
+                    type="text"
+                    value={newTableName}
+                    onChange={(e) => { setNewTableName(e.target.value); setEditError(null); }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleAddTable();
+                      if (e.key === 'Escape') setShowAddTable(false);
+                    }}
+                    placeholder="table_name"
+                    className="w-full text-sm rounded-md focus:outline-none"
+                    style={{ background: '#F5EEE5', border: '1px solid #D9CDBF', color: '#3E2723', padding: '7px 10px' }}
+                  />
+                  {editError && (
+                    <div className="text-xs mt-2" style={{ color: '#C4756C' }}>{editError}</div>
+                  )}
+                  <button
+                    onClick={handleAddTable}
+                    disabled={!newTableName.trim()}
+                    className="w-full mt-2 text-sm rounded-md disabled:opacity-50 hover:opacity-90"
+                    style={{ background: '#9B8F5E', color: '#FFFFFF', padding: '7px 10px' }}
+                  >
+                    Add table
+                  </button>
+                  <p className="text-xs mt-2" style={{ color: '#8B7355' }}>
+                    Adds a starter <code>id</code> {isSql ? 'serial PRIMARY KEY' : 'int [pk]'} column. Edit the rest in the text editor.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
           <button
             onClick={handleFitView}
             disabled={nodes.length === 0}
@@ -789,11 +1375,125 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTa
           </div>
         )}
 
+        {editable && armedField && (
+          <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-50">
+            <div
+              className="rounded-lg text-sm shadow-sm flex items-center gap-2"
+              style={{ background: '#FFFFFF', border: '1px solid #9B8F5E', color: '#3E2723', padding: '10px 16px' }}
+            >
+              <span
+                className="rounded-full"
+                style={{ width: 9, height: 9, background: '#9B8F5E', border: '2px solid #FFFFFF', boxShadow: '0 0 0 1px #9B8F5E' }}
+              />
+              Drag from <strong>{armedField.table}.{armedField.column}</strong> onto another field to add a foreign key
+              <button
+                onClick={() => setArmedField(null)}
+                className="rounded hover:opacity-70"
+                style={{ padding: '2px', marginLeft: '4px' }}
+              >
+                <X className="h-3.5 w-3.5" style={{ color: '#8B7355' }} />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {editable && connectToast && (
+          <div className="absolute z-50" style={{ bottom: '16px', left: '50%', transform: 'translateX(-50%)' }}>
+            <div className="rounded-lg text-sm shadow-md" style={{ background: '#3E2723', color: '#F5EFE7', padding: '10px 16px' }}>
+              {connectToast}
+            </div>
+          </div>
+        )}
+
+        {/* Add column modal */}
+        {editable && addColumnFor && (
+          <div
+            className="absolute inset-0 z-50 flex items-center justify-center"
+            style={{ background: 'rgba(62,39,35,0.25)' }}
+            onClick={() => setAddColumnFor(null)}
+          >
+            <div
+              className="rounded-lg shadow-xl"
+              style={{ background: '#FFFFFF', border: '1px solid #D9CDBF', padding: '18px', minWidth: '320px' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <Database className="h-4 w-4" style={{ color: '#9B8F5E' }} />
+                  <span className="text-sm font-semibold" style={{ color: '#3E2723' }}>
+                    Add row to {addColumnFor}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setAddColumnFor(null)}
+                  className="rounded hover:opacity-70"
+                  style={{ padding: '2px' }}
+                >
+                  <X className="h-4 w-4" style={{ color: '#8B7355' }} />
+                </button>
+              </div>
+              <label className="text-xs font-medium block mb-1" style={{ color: '#8B7355' }}>
+                Column name
+              </label>
+              <input
+                autoFocus
+                type="text"
+                value={newColumnName}
+                onChange={(e) => { setNewColumnName(e.target.value); setEditError(null); }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleAddColumn();
+                  if (e.key === 'Escape') setAddColumnFor(null);
+                }}
+                placeholder="column_name"
+                className="w-full text-sm rounded-md focus:outline-none mb-3"
+                style={{ background: '#F5EEE5', border: '1px solid #D9CDBF', color: '#3E2723', padding: '7px 10px' }}
+              />
+              <label className="text-xs font-medium block mb-1" style={{ color: '#8B7355' }}>
+                Type
+              </label>
+              <input
+                type="text"
+                value={newColumnType}
+                onChange={(e) => { setNewColumnType(e.target.value); setEditError(null); }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleAddColumn();
+                  if (e.key === 'Escape') setAddColumnFor(null);
+                }}
+                placeholder={isSql ? 'text' : 'varchar'}
+                className="w-full text-sm rounded-md focus:outline-none"
+                style={{ background: '#F5EEE5', border: '1px solid #D9CDBF', color: '#3E2723', padding: '7px 10px' }}
+              />
+              {editError && (
+                <div className="text-xs mt-2" style={{ color: '#C4756C' }}>{editError}</div>
+              )}
+              <div className="flex gap-2 mt-4">
+                <button
+                  onClick={() => setAddColumnFor(null)}
+                  className="flex-1 text-sm rounded-md hover:opacity-80"
+                  style={{ background: '#EBE3D5', color: '#3E2723', padding: '8px 12px' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAddColumn}
+                  disabled={!newColumnName.trim()}
+                  className="flex-1 text-sm rounded-md disabled:opacity-50 hover:opacity-90"
+                  style={{ background: '#9B8F5E', color: '#FFFFFF', padding: '8px 12px' }}
+                >
+                  Add row
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <ReactFlow
           nodes={nodes}
           edges={edges}
           onNodesChange={handleNodesChange}
           onEdgesChange={onEdgesChange}
+          onConnect={editable ? handleConnect : undefined}
+          connectionLineStyle={{ stroke: "#9B8F5E", strokeWidth: 2 }}
           nodeTypes={nodeTypes}
           fitView
           fitViewOptions={{ padding: 0.1, maxZoom: 1 }}
@@ -803,11 +1503,14 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTa
           panOnDrag={isInteractive}
           zoomOnScroll={isInteractive}
           zoomOnPinch={isInteractive}
-          zoomOnDoubleClick={isInteractive}
+          zoomOnDoubleClick={false}
           nodesDraggable={isInteractive}
           nodesConnectable={isInteractive}
           elementsSelectable={isInteractive}
-          onPaneClick={handleLockedInteraction}
+          onPaneClick={() => {
+            handleLockedInteraction();
+            setArmedField(null);
+          }}
           onPaneMouseMove={!isInteractive ? handleLockedInteraction : undefined}
         >
           <Background color="#D9CDBF" gap={16} size={1} />
