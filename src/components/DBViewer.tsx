@@ -15,9 +15,11 @@ import {
   Panel,
   Handle,
   Position,
+  getNodesBounds,
   type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { toPng } from "html-to-image";
 import { Parser, importer } from "@dbml/core";
 import {
   Database,
@@ -30,6 +32,8 @@ import {
   Loader2,
   Plus,
   X,
+  Download,
+  ImageDown,
 } from "lucide-react";
 
 // PostgreSQL reserved keywords that @dbml/core's ANTLR parser cannot accept as
@@ -534,6 +538,12 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTa
   const schemaRef = useRef<HTMLDivElement>(null);
   const isRestoring = useRef(false);
   const lockWarningTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  // Diagram image export. `exportPreview` holds the generated PNG data URL shown
+  // in the preview modal before the user commits to downloading it.
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportPreview, setExportPreview] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const editable = typeof onDbmlChange === "function";
   // Latest schema text, kept in a ref so the memoized node data callbacks always
@@ -1131,6 +1141,89 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTa
     fitView({ padding: 0.1, duration: 500 });
   };
 
+  // Render the current diagram (tables at their user-arranged positions, plus
+  // relationship edges) to a PNG. We don't screenshot the visible pane — instead
+  // we frame *all* nodes with padding and render at a fixed export resolution so
+  // the result is self-contained regardless of how the user has panned/zoomed.
+  const baseFileName = fileName.replace(/\.[^./\\]+$/, "") || "diagram";
+
+  const handleGeneratePreview = useCallback(async () => {
+    if (nodes.length === 0) return;
+    setExportError(null);
+    setIsExporting(true);
+    try {
+      const viewportEl = document.querySelector(
+        ".react-flow__viewport"
+      ) as HTMLElement | null;
+      if (!viewportEl) throw new Error("Diagram canvas not found");
+
+      // Frame every node with a fixed pixel margin. We pick the zoom ourselves
+      // (render tables close to 1:1, only shrinking if the diagram is enormous)
+      // and derive the canvas size from the scaled bounds — so the export is
+      // tightly cropped instead of floating in a huge empty canvas.
+      const PADDING = 80;
+      const MAX_DIM = 8192;
+      const bounds = getNodesBounds(nodes);
+
+      let zoom = Math.min(
+        2,
+        (MAX_DIM - PADDING * 2) / bounds.width,
+        (MAX_DIM - PADDING * 2) / bounds.height
+      );
+      zoom = Math.max(0.1, zoom);
+
+      const imageWidth = Math.ceil(bounds.width * zoom + PADDING * 2);
+      const imageHeight = Math.ceil(bounds.height * zoom + PADDING * 2);
+
+      // Place the bounds' top-left corner at (PADDING, PADDING) after scaling.
+      const x = PADDING - bounds.x * zoom;
+      const y = PADDING - bounds.y * zoom;
+
+      const dataUrl = await toPng(viewportEl, {
+        backgroundColor: "#F5EFE7",
+        width: imageWidth,
+        height: imageHeight,
+        pixelRatio: 2,
+        style: {
+          width: `${imageWidth}px`,
+          height: `${imageHeight}px`,
+          transform: `translate(${x}px, ${y}px) scale(${zoom})`,
+        },
+        filter: (node) => {
+          // Drop the interactive chrome (controls, minimap, panels, attribution)
+          // so only the diagram itself is captured.
+          const cls = (node as HTMLElement)?.classList;
+          if (!cls) return true;
+          return (
+            !cls.contains("react-flow__controls") &&
+            !cls.contains("react-flow__minimap") &&
+            !cls.contains("react-flow__panel") &&
+            !cls.contains("react-flow__attribution")
+          );
+        },
+      });
+
+      setExportPreview(dataUrl);
+    } catch (err) {
+      console.error("Failed to export diagram image:", err);
+      setExportError(
+        err instanceof Error ? err.message : "Failed to generate image"
+      );
+    } finally {
+      setIsExporting(false);
+    }
+  }, [nodes]);
+
+  const handleDownloadImage = useCallback(() => {
+    if (!exportPreview) return;
+    const link = document.createElement("a");
+    link.download = `${baseFileName}.png`;
+    link.href = exportPreview;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }, [exportPreview, baseFileName]);
+
   const filteredTables = nodes.filter((node) =>
     node.id.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -1344,6 +1437,21 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTa
             <ZoomIn className="h-4 w-4" />
             Fit
           </button>
+
+          <button
+            onClick={handleGeneratePreview}
+            disabled={nodes.length === 0 || isExporting}
+            className="flex items-center gap-2 text-sm rounded-md disabled:opacity-50 hover:opacity-90"
+            style={{ background: '#9B8F5E', border: '1px solid #9B8F5E', color: '#FFFFFF', padding: '8px 16px' }}
+            title="Download an image of the current diagram"
+          >
+            {isExporting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <ImageDown className="h-4 w-4" />
+            )}
+            {isExporting ? 'Rendering…' : 'Download image'}
+          </button>
         </div>
       </div>
 
@@ -1401,6 +1509,97 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTa
           <div className="absolute z-50" style={{ bottom: '16px', left: '50%', transform: 'translateX(-50%)' }}>
             <div className="rounded-lg text-sm shadow-md" style={{ background: '#3E2723', color: '#F5EFE7', padding: '10px 16px' }}>
               {connectToast}
+            </div>
+          </div>
+        )}
+
+        {/* Diagram image export: error toast */}
+        {exportError && (
+          <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-50">
+            <div
+              className="rounded-lg text-sm shadow-sm"
+              style={{ background: 'rgba(196, 117, 108, 0.15)', border: '1px solid #C4756C', color: '#C4756C', padding: '12px 20px' }}
+            >
+              {exportError}
+            </div>
+          </div>
+        )}
+
+        {/* Diagram image export: download preview */}
+        {exportPreview && (
+          <div
+            className="absolute inset-0 z-50 flex items-center justify-center"
+            style={{ background: 'rgba(62,39,35,0.35)', padding: '32px' }}
+            onClick={() => setExportPreview(null)}
+          >
+            <div
+              className="rounded-lg shadow-xl flex flex-col"
+              style={{ background: '#FFFFFF', border: '1px solid #D9CDBF', maxWidth: '900px', maxHeight: '100%', width: '100%' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div
+                className="flex items-center justify-between"
+                style={{ padding: '14px 18px', borderBottom: '1px solid #D9CDBF' }}
+              >
+                <div className="flex items-center gap-2">
+                  <ImageDown className="h-4 w-4" style={{ color: '#9B8F5E' }} />
+                  <span className="text-sm font-semibold" style={{ color: '#3E2723' }}>
+                    Download preview
+                  </span>
+                </div>
+                <button
+                  onClick={() => setExportPreview(null)}
+                  className="rounded hover:opacity-70"
+                  style={{ padding: '2px' }}
+                >
+                  <X className="h-4 w-4" style={{ color: '#8B7355' }} />
+                </button>
+              </div>
+
+              <div
+                className="flex-1 overflow-auto"
+                style={{ padding: '18px', background: '#F5EFE7' }}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={exportPreview}
+                  alt="Diagram preview"
+                  style={{
+                    display: 'block',
+                    margin: '0 auto',
+                    maxWidth: '100%',
+                    border: '1px solid #D9CDBF',
+                    borderRadius: '6px',
+                    background: '#F5EFE7',
+                  }}
+                />
+              </div>
+
+              <div
+                className="flex items-center justify-between gap-3"
+                style={{ padding: '14px 18px', borderTop: '1px solid #D9CDBF' }}
+              >
+                <span className="text-xs" style={{ color: '#8B7355' }}>
+                  Captures the current table arrangement · {baseFileName}.png
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setExportPreview(null)}
+                    className="text-sm rounded-md hover:opacity-80"
+                    style={{ background: '#EBE3D5', color: '#3E2723', padding: '8px 16px' }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleDownloadImage}
+                    className="flex items-center gap-2 text-sm rounded-md hover:opacity-90"
+                    style={{ background: '#9B8F5E', color: '#FFFFFF', padding: '8px 16px' }}
+                  >
+                    <Download className="h-4 w-4" />
+                    Download image
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}

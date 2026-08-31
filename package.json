@@ -17,6 +17,7 @@
     "@prisma/client": "^7.7.0",
     "@xyflow/react": "^12.10.2",
     "bcryptjs": "^3.0.3",
+    "html-to-image": "^1.11.13",
     "jose": "^6.2.2",
     "lucide-react": "^1.8.0",
     "next": "16.2.4",
