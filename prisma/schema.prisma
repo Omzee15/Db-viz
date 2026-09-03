@@ -11,6 +11,7 @@ model User {
   email        String   @unique
   passwordHash String   @map("password_hash")
   name         String
+  geminiApiKey String?  @map("gemini_api_key")
   isActive     Boolean  @default(true) @map("is_active")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")

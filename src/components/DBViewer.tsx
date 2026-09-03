@@ -34,6 +34,7 @@ import {
   X,
   Download,
   ImageDown,
+  Sparkles,
 } from "lucide-react";
 
 // PostgreSQL reserved keywords that @dbml/core's ANTLR parser cannot accept as
@@ -149,8 +150,32 @@ function findTableInsertionPoint(
   const indentMatch = body.match(/\n([ \t]+)\S/);
   const indent = indentMatch ? indentMatch[1] : "  ";
 
-  // Insert right after the last non-blank line inside the body.
-  let insertAt = bodyEnd;
+  // DBML requires every column to come BEFORE the table's `indexes { ... }` /
+  // `Note { ... }` sub-blocks. If the body ends with such a block, insert the
+  // new column just before it; otherwise insert after the last field line.
+  let sectionEnd = bodyEnd; // exclusive upper bound for the insertion point
+  if (!isSql) {
+    // Find the earliest top-level sub-block inside the body (relative to
+    // bodyStart+1). Sub-blocks are `indexes {`, `Note {`, etc. — anything that
+    // isn't a column and opens a nested brace.
+    const subBlockRe = /\n[ \t]*(indexes|note)\b[^\n{]*\{/gi;
+    let m: RegExpExecArray | null;
+    let earliest = -1;
+    while ((m = subBlockRe.exec(body)) !== null) {
+      // Only care about blocks at the table's top nesting level. Since the
+      // body string is already the table interior, any match here is top-level
+      // unless it sits inside another sub-block — but nested index/note blocks
+      // aren't valid DBML, so the first match is the boundary.
+      earliest = m.index; // offset of the leading "\n" within `body`
+      break;
+    }
+    if (earliest !== -1) {
+      sectionEnd = bodyStart + 1 + earliest;
+    }
+  }
+
+  // Insert right after the last non-blank char before `sectionEnd`.
+  let insertAt = sectionEnd;
   while (insertAt > bodyStart + 1 && /\s/.test(content[insertAt - 1])) {
     insertAt--;
   }
@@ -295,6 +320,16 @@ interface DBViewerProps {
   schemaOptions?: string[];
   selectedSchemas?: string[];
   onSchemasChange?: (next: string[]) => void;
+  // When provided, a "Fix Error" AI button appears in the parse-error box. The
+  // full schema text + the error are sent to the assistant and the corrected
+  // schema is passed back here to replace the editor content. `aiFixEnabled`
+  // reflects whether the user has configured a Gemini API key; when false the
+  // button is shown but points the user to Settings.
+  onAiFix?: (fixedContent: string) => void;
+  aiFixEnabled?: boolean;
+  // Opens the account settings so the user can add a Gemini API key. Called when
+  // "Fix Error" is clicked but no key is configured.
+  onConfigureAi?: () => void;
 }
 
 // Custom Table Node Component - Solarized Light theme like Project-Nest
@@ -524,11 +559,14 @@ const nodeTypes = {
 };
 
 // Inner component that uses ReactFlow hooks
-function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTableSelect, onDbmlChange, schemaOptions, selectedSchemas, onSchemasChange }: DBViewerProps) {
+function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTableSelect, onDbmlChange, schemaOptions, selectedSchemas, onSchemasChange, onAiFix, aiFixEnabled, onConfigureAi }: DBViewerProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<TableNodeType>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  // "Fix Error" AI assistant state.
+  const [isFixing, setIsFixing] = useState(false);
+  const [fixError, setFixError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -958,6 +996,7 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTa
 
       setIsLoading(true);
       setError(null);
+      setFixError(null);
 
       try {
         let dbmlContent: string;
@@ -1140,6 +1179,43 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTa
   const handleFitView = () => {
     fitView({ padding: 0.1, duration: 500 });
   };
+
+  // Send the failing schema + the parser error to the AI assistant and swap in
+  // the corrected schema it returns.
+  const handleAiFix = useCallback(async () => {
+    if (!onAiFix || !error) return;
+    if (!aiFixEnabled) {
+      onConfigureAi?.();
+      setFixError("Add a Gemini API key in Settings to use the AI assistant.");
+      return;
+    }
+    setFixError(null);
+    setIsFixing(true);
+    try {
+      const res = await fetch("/api/ai/fix-schema", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: dbmlContentRef.current,
+          fileName,
+          error,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success || typeof data.fixed !== "string") {
+        setFixError(data?.error || `Request failed (${res.status})`);
+        return;
+      }
+      onAiFix(data.fixed);
+    } catch (err) {
+      console.error("AI fix failed:", err);
+      setFixError(
+        err instanceof Error ? err.message : "Failed to reach the assistant"
+      );
+    } finally {
+      setIsFixing(false);
+    }
+  }, [onAiFix, error, fileName, aiFixEnabled, onConfigureAi]);
 
   // Render the current diagram (tables at their user-arranged positions, plus
   // relationship edges) to a PNG. We don't screenshot the visible pane — instead
@@ -1469,9 +1545,41 @@ function DBViewerInner({ dbmlContent, fileName, layoutData, onLayoutChange, onTa
           </div>
         )}
         {error && (
-          <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-50">
-            <div className="rounded-lg text-sm shadow-sm" style={{ background: 'rgba(196, 117, 108, 0.15)', border: '1px solid #C4756C', color: '#C4756C', padding: '12px 20px' }}>
-              {error}
+          <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-50" style={{ maxWidth: 'min(560px, calc(100% - 32px))' }}>
+            <div className="rounded-lg text-sm shadow-sm" style={{ background: 'rgba(196, 117, 108, 0.15)', border: '1px solid #C4756C', color: '#C4756C', padding: '12px 16px' }}>
+              {onAiFix && (
+                <div className="flex items-center justify-between gap-3" style={{ marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px solid rgba(196, 117, 108, 0.35)' }}>
+                  <span className="font-semibold" style={{ color: '#C4756C' }}>
+                    Couldn&apos;t parse this {isSql ? 'SQL' : 'DBML'}
+                  </span>
+                  <button
+                    onClick={handleAiFix}
+                    disabled={isFixing}
+                    className="flex items-center gap-1.5 rounded-md font-medium disabled:opacity-60 hover:opacity-90 flex-shrink-0"
+                    style={{ background: '#9B8F5E', color: '#FFFFFF', padding: '5px 10px', fontSize: '12px' }}
+                    title={
+                      aiFixEnabled
+                        ? 'Send this schema to the AI assistant and get a parser-friendly version back'
+                        : 'Add a Gemini API key in your account settings to enable this'
+                    }
+                  >
+                    {isFixing ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-3.5 w-3.5" />
+                    )}
+                    {isFixing ? 'Fixing…' : 'Fix Error'}
+                  </button>
+                </div>
+              )}
+              <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: '160px', overflowY: 'auto' }}>
+                {error}
+              </div>
+              {fixError && (
+                <div style={{ marginTop: '8px', fontSize: '12px', color: '#8B3A2F' }}>
+                  {fixError}
+                </div>
+              )}
             </div>
           </div>
         )}

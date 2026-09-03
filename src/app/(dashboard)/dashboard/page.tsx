@@ -31,6 +31,8 @@ import {
   Check,
   Link,
   Unplug,
+  Settings,
+  Sparkles,
 } from "lucide-react";
 import DBViewer from "@/components/DBViewer";
 import { useGuest } from "@/lib/guest-context";
@@ -66,6 +68,7 @@ interface UserInfo {
   id: string;
   name: string;
   email: string;
+  hasGeminiApiKey?: boolean;
 }
 
 interface ShareEntry {
@@ -114,6 +117,11 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [user, setUser] = useState<UserInfo | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  // Account settings modal (Gemini API key for the "Fix Error" AI assistant).
+  const [showSettings, setShowSettings] = useState(false);
+  const [geminiKeyInput, setGeminiKeyInput] = useState("");
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsError, setSettingsError] = useState("");
   const [isCreatingFile, setIsCreatingFile] = useState(false);
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [newItemName, setNewItemName] = useState("");
@@ -390,10 +398,48 @@ export default function DashboardPage() {
     } else {
       const userStr = localStorage.getItem("user");
       if (userStr) setUser(JSON.parse(userStr));
+      // Refresh from the server so we know whether a Gemini API key is set.
+      fetch("/api/auth/me")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (data?.success && data.user) setUser(data.user);
+        })
+        .catch(() => {});
       fetchFileTree();
       fetchSavedConnections();
     }
   }, [fetchFileTree, isGuest, guestFiles]);
+
+  const handleSaveGeminiKey = useCallback(
+    async (clear: boolean) => {
+      setSettingsError("");
+      setSavingSettings(true);
+      try {
+        const res = await fetch("/api/user/settings", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            geminiApiKey: clear ? null : geminiKeyInput.trim(),
+          }),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data?.success) {
+          setSettingsError(data?.error || `Request failed (${res.status})`);
+          return;
+        }
+        setUser((prev) =>
+          prev ? { ...prev, hasGeminiApiKey: data.hasGeminiApiKey } : prev
+        );
+        setGeminiKeyInput("");
+        if (clear || data.hasGeminiApiKey) setShowSettings(false);
+      } catch {
+        setSettingsError("Failed to save settings");
+      } finally {
+        setSavingSettings(false);
+      }
+    },
+    [geminiKeyInput]
+  );
 
   const fetchSavedConnections = useCallback(async () => {
     try {
@@ -1312,10 +1358,25 @@ export default function DashboardPage() {
                 <p className="text-sm font-medium" style={{ color: "#3E2723" }}>{isGuest ? "Guest Mode" : user?.name}</p>
                 <p className="text-xs" style={{ color: "#8B7355" }}>{isGuest ? "Files stored locally" : user?.email}</p>
               </div>
+              {!isGuest && (
+                <button
+                  onClick={() => {
+                    setShowUserMenu(false);
+                    setShowSettings(true);
+                    setGeminiKeyInput("");
+                    setSettingsError("");
+                  }}
+                  className="w-full flex items-center gap-2 text-sm hover:opacity-80 rounded-md"
+                  style={{ color: "#3E2723", padding: "10px 12px", marginTop: "8px" }}
+                >
+                  <Settings className="h-4 w-4" />
+                  Settings
+                </button>
+              )}
               <button
                 onClick={handleLogout}
                 className="w-full flex items-center gap-2 text-sm hover:opacity-80 rounded-md"
-                style={{ color: "#C4756C", padding: "10px 12px", marginTop: "8px" }}
+                style={{ color: "#C4756C", padding: "10px 12px", marginTop: isGuest ? "8px" : "2px" }}
               >
                 <LogOut className="h-4 w-4" />
                 {isGuest ? "Exit guest mode" : "Sign out"}
@@ -1756,6 +1817,18 @@ export default function DashboardPage() {
                       ? undefined
                       : handleDbmlChange
                   }
+                  onAiFix={
+                    isGuest ||
+                    (selectedFile.isSharedWithMe && !selectedFile.canWrite)
+                      ? undefined
+                      : handleDbmlChange
+                  }
+                  aiFixEnabled={Boolean(user?.hasGeminiApiKey)}
+                  onConfigureAi={() => {
+                    setShowSettings(true);
+                    setGeminiKeyInput("");
+                    setSettingsError("");
+                  }}
                 />
               );
             }
@@ -1888,6 +1961,102 @@ export default function DashboardPage() {
             <Trash2 className="h-4 w-4" />
             Delete
           </button>
+        </div>
+      )}
+
+      {/* Account Settings Modal */}
+      {showSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.4)", padding: "24px" }}>
+          <div className="rounded-xl shadow-2xl w-full max-w-lg" style={{ background: "#FFFFFF", border: "1px solid #D9CDBF" }}>
+            <div className="flex items-center justify-between" style={{ padding: "20px 24px 16px 24px", borderBottom: "1px solid #D9CDBF" }}>
+              <div className="flex items-center gap-2">
+                <Settings className="h-4 w-4" style={{ color: "#9B8F5E" }} />
+                <span className="font-semibold text-sm" style={{ color: "#3E2723" }}>Settings</span>
+              </div>
+              <button onClick={() => setShowSettings(false)} className="rounded hover:opacity-70" style={{ padding: "2px" }}>
+                <X className="h-4 w-4" style={{ color: "#8B7355" }} />
+              </button>
+            </div>
+
+            <div style={{ padding: "20px 24px" }}>
+              <div className="flex items-center gap-2" style={{ marginBottom: "6px" }}>
+                <Sparkles className="h-4 w-4" style={{ color: "#9B8F5E" }} />
+                <span className="text-sm font-semibold" style={{ color: "#3E2723" }}>AI assistant (Gemini)</span>
+              </div>
+              <p className="text-xs" style={{ color: "#8B7355", marginBottom: "12px", lineHeight: 1.5 }}>
+                Add your Google Gemini API key to enable the <strong>Fix Error</strong> button that
+                appears when a SQL / DBML file can&apos;t be parsed. The key is stored on your
+                account and used only for these requests.{" "}
+                <a
+                  href="https://aistudio.google.com/app/apikey"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: "#9B8F5E", textDecoration: "underline" }}
+                >
+                  Get a key
+                </a>
+              </p>
+
+              <div
+                className="text-xs rounded-md"
+                style={{
+                  background: user?.hasGeminiApiKey ? "#EEF6EE" : "#F5EEE5",
+                  color: user?.hasGeminiApiKey ? "#3F6F3F" : "#8B7355",
+                  padding: "8px 12px",
+                  marginBottom: "12px",
+                }}
+              >
+                {user?.hasGeminiApiKey
+                  ? "A Gemini API key is currently saved."
+                  : "No Gemini API key saved yet."}
+              </div>
+
+              <label className="text-xs font-medium block" style={{ color: "#8B7355", marginBottom: "4px" }}>
+                {user?.hasGeminiApiKey ? "Replace API key" : "API key"}
+              </label>
+              <input
+                type="password"
+                autoComplete="off"
+                value={geminiKeyInput}
+                onChange={(e) => { setGeminiKeyInput(e.target.value); setSettingsError(""); }}
+                placeholder="AIza..."
+                className="w-full text-sm rounded-md focus:outline-none font-mono"
+                style={{ background: "#F5EEE5", border: "1px solid #D9CDBF", color: "#3E2723", padding: "8px 10px" }}
+              />
+              {settingsError && (
+                <div className="text-xs" style={{ color: "#C4756C", marginTop: "8px" }}>{settingsError}</div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between gap-3" style={{ padding: "16px 24px", borderTop: "1px solid #D9CDBF" }}>
+              <button
+                onClick={() => handleSaveGeminiKey(true)}
+                disabled={savingSettings || !user?.hasGeminiApiKey}
+                className="text-sm rounded-md disabled:opacity-40 hover:opacity-80"
+                style={{ background: "transparent", color: "#C4756C", padding: "8px 12px" }}
+              >
+                Remove key
+              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowSettings(false)}
+                  className="text-sm rounded-md hover:opacity-80"
+                  style={{ background: "#EBE3D5", color: "#3E2723", padding: "8px 16px" }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleSaveGeminiKey(false)}
+                  disabled={savingSettings || !geminiKeyInput.trim()}
+                  className="flex items-center gap-2 text-sm rounded-md disabled:opacity-50 hover:opacity-90"
+                  style={{ background: "#9B8F5E", color: "#FFFFFF", padding: "8px 16px" }}
+                >
+                  {savingSettings && <Loader2 className="h-4 w-4 animate-spin" />}
+                  Save key
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

@@ -20,6 +20,7 @@ export async function GET() {
         email: true,
         name: true,
         createdAt: true,
+        geminiApiKey: true,
       },
     });
 
@@ -30,9 +31,10 @@ export async function GET() {
       );
     }
 
+    const { geminiApiKey, ...safeUser } = user;
     return NextResponse.json({
       success: true,
-      user,
+      user: { ...safeUser, hasGeminiApiKey: Boolean(geminiApiKey) },
     });
   } catch (error) {
     console.error("Get user error:", error);
